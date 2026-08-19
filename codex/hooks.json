@@ -1,0 +1,17 @@
+{
+  "description": "Block trivial push-only prompts that waste a full Codex turn.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.codex/hooks/prompt_guard.py\"",
+            "timeout": 5,
+            "statusMessage": "Checking prompt workflow"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Local test/render artifacts
+_render*/
+_tmp*/
+*.log
+
+# Local secrets / environment
+.env
+.env.*
+!.env.example
+
+# Generated local Codex state if this repository itself is used as a workspace
+.codex-local/

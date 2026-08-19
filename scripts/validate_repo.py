@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import pathlib
+import sys
+import tomllib
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+errors: list[str] = []
+
+
+def require(path: str) -> None:
+    p = ROOT / path
+    if not p.exists():
+        errors.append(f"missing required path: {path}")
+
+
+for path in [
+    "README.md",
+    "PRINT_RULES.pdf",
+    "LICENSE",
+    "ACKNOWLEDGEMENTS.md",
+    "CONTRIBUTING.md",
+    "docs/INSTALLATION.md",
+    "docs/WORKFLOW.md",
+    "docs/TOOLING.md",
+    "docs/ASCEND.md",
+    "docs/TROUBLESHOOTING.md",
+    "codex/config/config.toml",
+    "codex/hooks.json",
+    "windows/00-preflight.ps1",
+    "windows/01-bootstrap-windows.ps1",
+    "wsl/02-bootstrap-wsl.sh",
+    "wsl/03-setup-sglang-workspace.sh",
+]:
+    require(path)
+
+try:
+    with (ROOT / "codex/hooks.json").open(encoding="utf-8") as f:
+        json.load(f)
+except Exception as exc:
+    errors.append(f"invalid codex/hooks.json: {exc}")
+
+for p in sorted((ROOT / "codex/config").glob("*.toml")):
+    try:
+        with p.open("rb") as f:
+            tomllib.load(f)
+    except Exception as exc:
+        errors.append(f"invalid TOML {p.relative_to(ROOT)}: {exc}")
+
+main_config = ROOT / "codex/config/config.toml"
+if main_config.exists():
+    text = main_config.read_text(encoding="utf-8")
+    if "startup_timeout_sec = 120" not in text:
+        errors.append("Semble startup timeout must be 120 seconds in codex/config/config.toml")
+
+if errors:
+    print("Repository validation failed:", file=sys.stderr)
+    for error in errors:
+        print(f"- {error}", file=sys.stderr)
+    raise SystemExit(1)
+
+print("Repository metadata, JSON, TOML, docs, and Semble timeout: OK")

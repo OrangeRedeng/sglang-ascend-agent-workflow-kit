@@ -1,0 +1,29 @@
+#:schema https://developers.openai.com/codex/config-schema.json
+
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+model_reasoning_summary = "concise"
+model_verbosity = "low"
+personality = "pragmatic"
+
+review_model = "gpt-5.6-sol"
+plan_mode_reasoning_effort = "high"
+file_opener = "vscode"
+web_search = "cached"
+
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[history]
+persistence = "save-all"
+
+[agents]
+default_subagent_model = "gpt-5.6-luna"
+default_subagent_reasoning_effort = "medium"
+max_concurrent_threads_per_session = 2
+
+[mcp_servers.semble]
+command = "uvx"
+args = ["--from", "semble[mcp]", "semble"]
+enabled = true
+startup_timeout_sec = 120

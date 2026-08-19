@@ -1,0 +1,6 @@
+# OPTIONAL: append this block to ~/.codex/config.toml after installing Serena.
+[mcp_servers.serena]
+startup_timeout_sec = 60
+command = "serena"
+args = ["start-mcp-server", "--project-from-cwd", "--context=codex"]
+enabled = true
