@@ -6,6 +6,8 @@
 
 A new engineering objective normally gets a new Codex session. Long, evidence-driven experiments are the exception.
 
+For what is automatic versus manual, see [Automation and enforcement](AUTOMATION.md).
+
 ## 1. Session boundaries
 
 Use a new session for each atomic objective:
@@ -24,8 +26,8 @@ Example:
 
 ```text
 PR #31320
-  review             -> Sol/high   -> stop
-  address findings   -> Terra      -> stop
+  review             -> Sol/high   -> handoff if needed -> stop
+  address findings   -> Terra      -> consume handoff   -> stop
   resolve conflicts  -> Terra      -> stop
   update description -> Luna       -> stop
 ```
@@ -34,32 +36,77 @@ PR #31320
 
 - `/side` - a short detour that does not change the objective.
 - `/compact` - reduce transcript size while continuing the same objective.
-- `/fork` - explore an alternative from the same state; not a cheap review-to-implementation handoff.
+- `/fork` - explore an alternative from the same state; **not** a review-to-implementation handoff.
 
 ## 2. Review -> implementation handoff
 
-When Codex itself discovers findings that are not already represented as GitHub review threads:
+### What is automatic
+
+For report-only PR review, the local SGLang review skill now has a **MUST-create** handoff rule when all of the following are true:
+
+1. Codex found actionable findings;
+2. implementation is not being performed in the same review session;
+3. those findings are not already authoritative unresolved GitHub review threads.
+
+So this prompt is enough:
+
+```text
+Review PR #31320. Report only.
+```
+
+Expected result:
 
 ```text
 Session A: review only
-  -> .codex/handoffs/pr-<N>-review.md
+  -> actionable findings
+  -> .codex/handoffs/pr-31320-review.md   (automatic by repo rule)
   -> stop
 
-Session B: read the handoff
-  -> implement actionable findings
-  -> re-check each finding
+Session B: implementation
+  -> GitHub unresolved threads if authoritative
+     OR .codex/handoffs/pr-31320-review.md
+  -> re-verify current HEAD
+  -> implement only listed actionable findings
+  -> targeted validation
   -> stop
 ```
 
-Create a handoff template with:
+The second session must not redo the broad PR review just to reconstruct context.
+
+### Handoff contents
+
+Keep only durable implementation information:
+
+- source/PR and reviewed commit when known;
+- severity/priority;
+- file and symbol;
+- root cause/problem;
+- exact intended change;
+- constraints/non-goals;
+- minimal validation;
+- material uncertainty only when it changes implementation.
+
+Do **not** copy review narration, exploratory dead ends, long diffs, or chat history.
+
+### Create one manually
+
+Numeric PR:
 
 ```bash
-.codex/scripts/new-handoff.sh <PR-number>
+.codex/scripts/new-handoff.sh 31320
+# .codex/handoffs/pr-31320-review.md
 ```
 
-The handoff should contain only severity, file/symbol, root cause/problem, required change, constraints, and minimal validation.
+Generic bounded investigation:
 
-If the authoritative findings already exist as unresolved GitHub review comments, prefer reading those in the new session instead of duplicating them in a local handoff.
+```bash
+.codex/scripts/new-handoff.sh scheduler-rank-desync
+# .codex/handoffs/scheduler-rank-desync.md
+```
+
+If there are no actionable findings, do not create an empty handoff.
+
+If the authoritative findings already exist as unresolved GitHub review comments, use those in the new session rather than maintaining a duplicate local copy.
 
 ## 3. Long performance/kernel work -> Goal + artifacts
 
@@ -169,6 +216,8 @@ Use `/usage` periodically and watch for:
 - repeated reads/searches of the same context;
 - unnecessary xhigh use;
 - trivial Git prompts;
-- performance experiments without an artifact ledger.
+- performance experiments without an artifact ledger;
+- large logs read without reduction;
+- implementation sessions that redo an existing review instead of consuming a handoff.
 
 Optimize the workflow only after observing an actual bottleneck; do not add many MCP/RAG tools at once.

@@ -1,61 +1,71 @@
-# CODEX + SGLANG / ASCEND - Quick Reference
+# CODEX + SGLANG / ASCEND - Daily Rules
 
-**Goal:** reduce unnecessary turns and context without losing engineering continuity.
+**You describe the engineering objective. Repo rules/skills handle the workflow.**
 
-## Before every prompt - take 15 seconds
+## Start here - 4 questions
 
-1. **New objective?** Yes -> new session. Do not carry the old transcript.
-2. **Review -> implementation?** Write a compact handoff -> new session. Do not use `/fork`.
-3. **One long performance/kernel goal?** `/plan -> /goal` + artifact ledger. Chat = working memory.
-4. **Just a Git command?** `push/status/fetch/switch` -> terminal, not the model.
+1. **New objective?** -> New session.
+2. **Review found actionable local issues?** -> Handoff is written before STOP; implementation uses a new session.
+3. **Large local/downloaded log?** -> Reducer runs before any full raw-log read.
+4. **Just Git plumbing?** `push/status/fetch/switch` -> terminal, not a model turn.
 
-## 1. Session lifecycle
+## Automatic by repo rule (no extra prompt text)
 
-- **Atomic:** conflict, comment, CI fix, description -> new short session -> STOP.
-- **Handoff:** review/investigation -> `.codex/handoffs/...` -> new implementation session.
-- **Goal:** evidence-driven performance/kernel loop -> `.codex/goals/...` + artifact ledger.
-- **Same goal:** `/compact` as history grows; `/side` for a short detour; `/fork` only for alternatives.
+### LARGE LOG - MUST REDUCE FIRST
 
-## 2. Model routing
+If `>= 1 MiB` **or** `>= 10,000 lines`:
 
-- **Luna / low:** PR description, metadata, docs, mechanical edits.
-- **Terra / medium:** default - conflicts, comments, ordinary bugs and refactors.
-- **Sol / high:** deep review, hard feature, Ascend correctness, HCCL/NPUGraph/performance root cause.
-- **Sol / xhigh:** escalate only after focused investigation fails.
-- **Rule:** do not start routine work on Sol/xhigh "just in case".
+`size check -> extract-log-context.py -> .codex/logs/*.focused.txt -> inspect focused artifact -> raw ranges only if needed`
 
-## 3. Search routing
+**Never:** `cat` / full `Get-Content` / full raw-log read first.
+
+### REVIEW -> HANDOFF -> NEW SESSION
+
+If report-only review/investigation finds actionable issues and GitHub threads are not already authoritative:
+
+`review -> .codex/handoffs/... -> STOP -> new implementation session -> re-verify -> patch`
+
+Implementation **does not redo the broad review**.
+
+Handoff stores only: `severity | file/symbol | root cause | intended change | constraints | validation`.
+
+## Search routing
 
 - Exact symbol/error/path -> `rg`.
-- Known commit/PR -> `git show`, `git diff`, bounded `git log`.
-- Model history -> `model-pr-history-knowledge`.
-- Unknown concept/location -> Semble.
-- Callers/references -> Serena, only when actually needed.
-- Huge log -> reduce/grep context first; read the full log only on demand.
+- Known PR/commit -> `git show` / `git diff`.
+- Model optimization history -> `model-pr-history-knowledge`.
+- Unknown concept/location -> **Semble**.
+- Known symbol + callers/references -> **Serena** (optional).
+- Once a concrete symbol is found -> stop broad semantic discovery.
 
-## 4. Do not spend an LLM turn
+## Session + model routing
 
-- `git push/status/fetch/switch` and a simple `pull`, when the decision is already made -> terminal.
-- Do not send `push`, `continue`, or `update` as standalone prompts in a long thread.
-- Do not do cleanup/docs/comments/refactors "while you are here" after the current objective is complete.
-- Do not create or modify tests by default; only for an explicit request, review/CI requirement, or a real regression guard.
-- UserPromptSubmit guard blocks a standalone `push` before a model call.
+- **Luna / low:** metadata, PR description, docs, mechanical edits.
+- **Terra / medium:** default development, conflicts, comments, normal bugs/refactors.
+- **Sol / high:** deep review, hard Ascend correctness, HCCL/NPUGraph/perf root cause.
+- **Sol / xhigh:** escalation only after focused high-effort work fails.
 
-## 5. Ascend / NPU hard gates
+`review -> handoff -> new implementation session` | long perf/kernel loop -> `/plan` + `/goal` + `.codex/goals/`
 
-Before diagnosis/benchmarking, record:
+## Ascend / NPU hard gates
 
-`hardware | CANN | torch | torch_npu | sgl-kernel-npu | SGLang commit | graph/eager | dtype/quant | TP/DP/EP | workload | backend path`
+Record before version-sensitive diagnosis/benchmark:
 
-- STOP the benchmark if baseline/candidate differ by more than the tested variable or there is a silent fallback.
-- Do not mechanically transfer CUDA/NCCL/graph/stream/layout/dtype assumptions to NPU.
-- Kernel microbenchmark win != E2E SGLang win; confirm with a real-model benchmark.
+`hardware | CANN | torch | torch_npu | sgl-kernel-npu | SGLang commit | graph/eager | dtype/quant | TP/DP/EP | workload | actual backend`
 
-## 6. Finish + quick commands
+STOP if baseline/candidate differ by unrelated variables or a silent fallback changes the backend.
 
-Before STOP: objective complete? diff minimal? validation sufficient? caveats recorded?
+CUDA/NCCL/graph/stream assumptions are **not** automatically valid for Ascend/HCCL/NPUGraph.
 
-- `cxl` Luna | `cx` Terra | `cxh` Sol/high | `cxx` Sol/xhigh
-- `/review` `/side` `/compact` `/goal` `/usage weekly` `/status`
+Kernel microbenchmark win != E2E SGLang win.
 
-**Core rule:** Chat = working memory. Git = code state. Handoff/Goal files = durable memory. **NEW OBJECTIVE = NEW SESSION.**
+## STOP rules
+
+Before ending: `objective complete? | diff minimal? | validation sufficient? | handoff/Goal updated if needed?`
+
+Do not add unrelated cleanup/docs/tests/refactors after the objective is solved.
+Tests only when explicitly requested, required by review/CI, or needed as a real regression guard.
+
+`cxl` Luna | `cx` Terra | `cxh` Sol/high | `cxx` Sol/xhigh
+
+**Chat = working memory. Git = code state. Handoff/Goal files = durable memory. NEW OBJECTIVE = NEW SESSION.**

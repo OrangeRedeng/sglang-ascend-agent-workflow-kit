@@ -1,6 +1,6 @@
 # Tooling and search routing
 
-The tools in this kit solve different retrieval problems. They should not all run for every question.
+The tools in this kit solve different retrieval problems. They should not all run for every question. For which behaviors are automatic versus manual, see [Automation and enforcement](AUTOMATION.md).
 
 ## Search ladder
 
@@ -138,10 +138,54 @@ It intentionally does not block richer requests where Git operations are part of
 
 ## Large logs
 
-Do not paste or read a full multi-megabyte CI/NPU log first. Use the local reducer:
+### You do not need to mention the reducer in the prompt
 
-```bash
-.codex/scripts/extract-log-context.py <log-file>
+For a **local or downloaded** log, `AGENTS.override.md` and the log-analysis skill define this as the default workflow:
+
+```text
+log >= 1 MiB OR >= 10,000 lines
+  -> check size/line count without reading the body
+  -> MUST NOT read the raw log in full
+  -> run reducer
+  -> read .codex/logs/<name>.focused.txt
+  -> inspect narrow raw ranges only if a concrete fact is missing
 ```
 
-Then inspect the failure window, relevant errors, shapes/dtypes, HCCL/ACL/AICore messages, and performance/memory lines.
+So this is enough:
+
+```text
+Analyze /tmp/npu-ci.log and find the root cause.
+```
+
+The reducer command is:
+
+```bash
+cd ~/code/sglang
+.codex/scripts/extract-log-context.py /tmp/npu-ci.log
+```
+
+By default it **writes** the reduced artifact instead of dumping it into the tool output:
+
+```text
+.codex/logs/npu-ci.log.focused.txt
+```
+
+The terminal receives only a short summary/path. This avoids replacing one huge raw-log read with a huge reduced-log tool response.
+
+Typical output:
+
+```text
+Focused log: /home/user/code/sglang/.codex/logs/npu-ci.log.focused.txt
+Source: 7342812 bytes, 68144 lines
+Matches: 407 total, 120 included
+```
+
+Then inspect the focused artifact for the first failure/traceback, HCCL/ACL/AICore errors, shapes/dtypes, timeout/hang signals, and relevant latency/throughput/memory lines. Read the original log only by a narrow range when a specific missing fact requires it.
+
+The path `.codex/scripts/...` is **inside the configured SGLang checkout** after `03-setup-sglang-workspace.sh`; the source shipped by this kit lives at `repo/.codex/scripts/...`.
+
+Use `--stdout` only when you intentionally want the focused content printed to the terminal/model context:
+
+```bash
+.codex/scripts/extract-log-context.py --stdout /tmp/npu-ci.log
+```

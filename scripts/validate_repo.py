@@ -23,6 +23,7 @@ for path in [
     "ACKNOWLEDGEMENTS.md",
     "CONTRIBUTING.md",
     "docs/INSTALLATION.md",
+    "docs/AUTOMATION.md",
     "docs/WORKFLOW.md",
     "docs/TOOLING.md",
     "docs/ASCEND.md",
@@ -33,6 +34,10 @@ for path in [
     "windows/01-bootstrap-windows.ps1",
     "wsl/02-bootstrap-wsl.sh",
     "wsl/03-setup-sglang-workspace.sh",
+    "scripts/build_print_rules.py",
+    "repo/.codex/scripts/extract-log-context.py",
+    "repo/.codex/scripts/new-handoff.sh",
+    "repo/.codex/handoffs/TEMPLATE.md",
 ]:
     require(path)
 
@@ -54,6 +59,33 @@ if main_config.exists():
     text = main_config.read_text(encoding="utf-8")
     if "startup_timeout_sec = 120" not in text:
         errors.append("Semble startup timeout must be 120 seconds in codex/config/config.toml")
+
+
+contracts = {
+    "repo/AGENTS.override.md": [
+        "1 MiB",
+        "10,000 lines",
+        "MUST NOT",
+        "**MUST** write a compact handoff",
+        "Do not perform another broad PR review",
+    ],
+    "repo/.agents/skills/sglang-pr-review/SKILL.md": [
+        "write `.codex/handoffs/pr-<N>-review.md` before stopping",
+    ],
+    "docs/AUTOMATION.md": [
+        "Hard-enforced",
+        "Instruction-enforced",
+        "Large logs - automatic by rule",
+        "Handoffs - automatic by rule",
+    ],
+}
+for rel, needles in contracts.items():
+    path = ROOT / rel
+    if path.exists():
+        text = path.read_text(encoding="utf-8")
+        for needle in needles:
+            if needle not in text:
+                errors.append(f"missing workflow contract in {rel}: {needle}")
 
 if errors:
     print("Repository validation failed:", file=sys.stderr)

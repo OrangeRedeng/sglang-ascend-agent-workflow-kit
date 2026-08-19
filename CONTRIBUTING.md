@@ -21,6 +21,7 @@ User-facing docs are intentionally limited to:
 - `docs/ASCEND.md`;
 - `docs/TROUBLESHOOTING.md`;
 - `PRINT_RULES.pdf` - one-page printable reference.
+- `docs/AUTOMATION.md` - automation/enforcement contracts for logs, handoffs, and routing.
 
 Do not create another README-like file unless its topic does not fit an existing document.
 
@@ -36,7 +37,7 @@ python3 scripts/validate_repo.py
 
 PowerShell scripts should also parse successfully on Windows/PowerShell. GitHub Actions performs the same checks on Linux and Windows.
 
-If `PRINT_RULES.pdf` changes, render it and visually verify that it remains one page with no clipped or overlapping content.
+If `PRINT_RULES.pdf` changes, update `docs/source/PRINT_RULES.md`, rebuild it with `python3 scripts/build_print_rules.py`, then render and visually verify that it remains one page with no clipped or overlapping content.
 
 ## Third-party updates
 

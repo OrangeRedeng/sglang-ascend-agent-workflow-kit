@@ -23,14 +23,14 @@ The largest savings usually come from session lifecycle and retrieval discipline
 | Mechanism | What it changes | Expected token impact | Usability impact |
 |---|---|---:|---|
 | **New objective -> new session** | Stops unrelated history from following the next task | **Very high** for long sessions | Cleaner scope; fewer accidental side quests |
-| **Handoff artifacts** | Transfers only actionable findings between review/debug/implementation sessions | **High** when one task feeds another | Review and implementation stay independent but connected |
+| **Handoff artifacts** | Automatically record local actionable review/investigation findings for the next session; implementation consumes the compact artifact instead of re-reviewing | **High** when one task feeds another | Review and implementation stay independent but connected |
 | **Goal + experiment ledger** | Keeps benchmark state, hypotheses, failures, and next steps in files instead of chat history | **High** for multi-round performance work | Long optimization loops become reproducible and resumable |
 | **Model routing** | Uses Luna/Terra for routine work and Sol only where deeper reasoning is justified | **Direct cost reduction** | Less manual model switching; expensive reasoning is reserved for hard work |
 | **Prompt guard** | Blocks standalone `git push`-style prompts before they become model turns | **High per avoided trivial turn in a long session** | Simple Git actions stay in the terminal where they belong |
 | **Targeted `rg` / Git first** | Uses exact search when an identifier, error, path, PR, or commit is already known | **Medium to high** | Faster navigation; less tool wandering |
 | **Semble** | Returns small semantic code chunks for conceptual questions instead of grep + full-file reads | **Potentially high retrieval savings** | Natural-language code discovery when the symbol/path is unknown |
 | **Serena (optional)** | Uses LSP-backed symbol relationships for callers, references, implementations, and refactors | **Medium**, especially in large cross-file tasks | IDE-like navigation and safer structural edits |
-| **Log reduction** | Extracts errors, metrics, and nearby context before giving large CI/profiler logs to the model | **High for large logs** | Faster triage; less irrelevant output to inspect |
+| **Log reduction** | For local/downloaded logs >= 1 MiB or >= 10k lines, repo rules require focused reduction before any full raw-log read | **High for large logs** | Faster triage; less irrelevant output to inspect |
 | **Task-specific skills** | Reuses bounded workflows for PR review, regressions, Ascend profiling, HCCL, `torch_npu`, etc. | **Indirect but often significant** | Fewer repeated instructions and fewer wrong investigation branches |
 | **Stop rules** | Ends the session once the requested change and minimal validation are complete | **Medium to high** | Prevents cleanup/refactor/review expansion after the task is already solved |
 
@@ -56,6 +56,30 @@ For repository work, **repeated input/context is often the dominant term**. That
 Semble reports roughly **99% fewer retrieval tokens than grep+read in its own benchmark at comparable recall**. Treat this as a retrieval benchmark, not a promise of 99% lower end-to-end Codex usage: model reasoning, Git operations, tests, and later tool calls still consume context.
 
 Serena has a different benefit. It is not primarily a semantic-search replacement; once a concrete symbol is known, it can answer structural questions such as callers/references directly through language-server information. This often replaces several `rg -> read -> rg -> read` steps with one symbol-aware lookup.
+
+### What happens automatically?
+
+The kit distinguishes three enforcement levels:
+
+- **Hard-enforced:** code/hooks perform or block the behavior without relying on model judgment (for example, standalone `git push` prompts are blocked before a model call).
+- **Instruction-enforced:** `AGENTS.override.md` and task skills use **MUST** rules. Large-log reduction and handoff creation/consumption are in this category; normally you do **not** repeat them in the prompt.
+- **Manual/optional:** capabilities such as Serena or optional AscendC/Triton skill bundles are enabled only when you choose to install/use them.
+
+Examples:
+
+```text
+Analyze /tmp/npu-ci.log and find the root cause.
+```
+
+For a large local/downloaded log, Codex should check its size, run `.codex/scripts/extract-log-context.py`, read the focused artifact, and only then inspect narrow raw ranges if necessary.
+
+```text
+Review PR #31320. Report only.
+```
+
+If actionable local findings exist and unresolved GitHub review threads are not already the authoritative record, the review skill should write `.codex/handoffs/pr-31320-review.md` before the session ends. A new implementation session consumes that handoff instead of repeating the broad review.
+
+See [Automation and enforcement](docs/AUTOMATION.md) for the exact contracts and thresholds.
 
 ### Convenience and reliability gains
 
@@ -137,6 +161,7 @@ cxx  -> Sol / xhigh      escalation only
 ## Documentation
 
 - [Installation](docs/INSTALLATION.md) - Windows, WSL, VPN, Codex, Semble, workspace setup.
+- [Automation](docs/AUTOMATION.md) - what happens automatically, what is instruction-enforced, and what remains manual.
 - [Workflow](docs/WORKFLOW.md) - session boundaries, handoffs, Goals, model routing, tests, Git discipline.
 - [Tooling](docs/TOOLING.md) - `rg`, Git, Semble, Serena, model-history skills, prompt guard.
 - [Ascend / NPU](docs/ASCEND.md) - `torch_npu`, profiling, HCCL, Triton, AscendC, benchmark gates.

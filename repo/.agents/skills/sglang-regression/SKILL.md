@@ -11,3 +11,4 @@ description: Diagnose and fix an SGLang regression when a relevant commit, PR, g
 5. Make the smallest fix preserving intended behavior.
 6. Add a regression test only if it has independent guard value and is actually required.
 7. Validate the original failing path first, then stop.
+8. If the task is investigation/report-only and implementation is intentionally deferred, write a compact `.codex/handoffs/<slug>.md` before stopping when actionable next changes exist. Do not create one when the report has no actionable next step.
