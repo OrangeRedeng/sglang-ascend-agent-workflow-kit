@@ -2,6 +2,12 @@
 
 **You describe the engineering objective. Repo rules/skills handle the workflow.**
 
+## Daily start
+
+**Default UI:** `cd ~/code/sglang && code .` -> confirm **WSL: Ubuntu** -> Codex sidebar -> new local session.
+
+`cx/cxh/...` are independent CLI sessions, not a way to connect Codex to VS Code.
+
 ## Start here - 4 questions
 
 1. **New objective?** -> New session.
@@ -66,6 +72,8 @@ Before ending: `objective complete? | diff minimal? | validation sufficient? | h
 Do not add unrelated cleanup/docs/tests/refactors after the objective is solved.
 Tests only when explicitly requested, required by review/CI, or needed as a real regression guard.
 
-`cxl` Luna | `cx` Terra | `cxh` Sol/high | `cxx` Sol/xhigh
+**VS Code extension:** Terra/medium default; switch to Sol/high in UI for hard work.
+
+**CLI optional:** `cxl` Luna | `cx` Terra | `cxh` Sol/high | `cxx` Sol/xhigh
 
 **Chat = working memory. Git = code state. Handoff/Goal files = durable memory. NEW OBJECTIVE = NEW SESSION.**

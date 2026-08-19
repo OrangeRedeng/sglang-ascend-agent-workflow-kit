@@ -24,7 +24,7 @@ The bootstrap installs or verifies:
 - Git for Windows;
 - Visual Studio Code;
 - VS Code WSL extension;
-- OpenAI ChatGPT/Codex VS Code extension;
+- OpenAI ChatGPT/Codex VS Code extension (recommended daily UI);
 - WSL2 / Ubuntu;
 - `%USERPROFILE%\.wslconfig` networking settings.
 
@@ -170,6 +170,13 @@ Then:
 ```bash
 cd ~/code/sglang
 code .
+```
+
+In VS Code, confirm `WSL: Ubuntu`, open the Codex sidebar, and start a new local session. See [VS Code + Codex](VSCODE.md).
+
+CLI is optional and independent:
+
+```bash
 cx
 ```
 
@@ -193,7 +200,25 @@ Do not install Serena immediately unless symbol navigation is already a known bo
 
 Append `codex/config/serena.optional.toml` to `~/.codex/config.toml`, restart Codex, and use Serena primarily for callers/references/symbol structure.
 
-## 10. Validation
+## 10. VS Code extension validation
+
+From Ubuntu:
+
+```bash
+cd ~/code/sglang
+code .
+```
+
+In VS Code:
+
+1. confirm the lower-left indicator says `WSL: Ubuntu`;
+2. confirm the Codex/OpenAI extension is enabled;
+3. open the Codex sidebar and start a **new local session**;
+4. use the read-only verification prompt from [VS Code + Codex](VSCODE.md#4-verify-that-the-extension-sees-the-correct-workspace).
+
+After changes to `~/.codex/config.toml` or `~/.codex/.env`, restart the extension/VS Code window and start a new session.
+
+## 11. CLI validation (optional)
 
 From `~/code/sglang`:
 

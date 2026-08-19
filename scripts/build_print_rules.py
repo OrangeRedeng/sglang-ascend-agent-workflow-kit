@@ -65,7 +65,7 @@ def main() -> None:
     c.setFillColor(NAVY)
     c.roundRect(M, PAGE_H - M - HEADER_H, PAGE_W - 2 * M, HEADER_H, 9, fill=1, stroke=0)
     draw_para(c, "CODEX + SGLANG / ASCEND - Daily Rules", styles["title"], M + 16, PAGE_H - M - 13, PAGE_W - 2 * M - 32)
-    draw_para(c, "Describe the engineering objective. Repo rules/skills handle log reduction, handoffs, and search routing.", styles["subtitle"], M + 16, PAGE_H - M - 39, PAGE_W - 2 * M - 32)
+    draw_para(c, "Default: open ~/code/sglang with VS Code in WSL and use the Codex sidebar. Repo rules/skills handle the workflow.", styles["subtitle"], M + 16, PAGE_H - M - 39, PAGE_W - 2 * M - 32)
 
     xs = [M, M + COL_W + G, M + 2 * (COL_W + G)]
 
@@ -116,9 +116,9 @@ def main() -> None:
          "No unrelated cleanup/docs/tests/refactors after the objective is solved.<br/><br/>"
          "Tests only when explicitly requested, required by review/CI, or needed as a real regression guard.", GREEN)
     y -= 128
-    card(c, xs[2], y, 108, "QUICK COMMANDS",
-         "<font name='Courier'>cxl</font> Luna | <font name='Courier'>cx</font> Terra | <font name='Courier'>cxh</font> Sol/high | <font name='Courier'>cxx</font> Sol/xhigh<br/><br/>"
-         "<font name='Courier'>/review /side /compact /goal /usage /status</font><br/><br/>"
+    card(c, xs[2], y, 108, "DAILY UI / QUICK COMMANDS",
+         "<b>Default:</b> <font name='Courier'>cd ~/code/sglang &amp;&amp; code .</font> -> WSL: Ubuntu -> Codex sidebar.<br/><br/>"
+         "<b>CLI optional:</b> <font name='Courier'>cxl</font> Luna | <font name='Courier'>cx</font> Terra | <font name='Courier'>cxh</font> Sol/high | <font name='Courier'>cxx</font> Sol/xhigh<br/><br/>"
          "Handoff: <font name='Courier'>.codex/scripts/new-handoff.sh &lt;PR|slug&gt;</font>", GRAY)
 
     c.setStrokeColor(BORDER)

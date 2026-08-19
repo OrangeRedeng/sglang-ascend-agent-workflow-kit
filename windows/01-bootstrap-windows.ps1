@@ -41,10 +41,32 @@ function Set-Wsl2ConfigOption {
 
 function Ensure-WingetPackage {
     param([string]$Id, [string]$Name)
-    Write-Host "\n==> $Name" -ForegroundColor Cyan
+    Write-Host "`n==> $Name" -ForegroundColor Cyan
+
+    $installed = winget list --id $Id --exact --accept-source-agreements 2>$null
+    if ($LASTEXITCODE -eq 0 -and ($installed -join "`n") -match [regex]::Escape($Id)) {
+        Write-Host "$Name is already installed; skipping package upgrade." -ForegroundColor Green
+        return
+    }
+
     winget install --id $Id --exact --accept-package-agreements --accept-source-agreements --silent
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "winget returned $LASTEXITCODE for $Name. It may already be installed; verify manually." -ForegroundColor Yellow
+        Write-Host "winget returned $LASTEXITCODE for $Name. Verify manually." -ForegroundColor Yellow
+    }
+}
+
+function Ensure-VSCodeExtension {
+    param([string]$CodeCommand, [string]$ExtensionId)
+    $extensions = & $CodeCommand --list-extensions 2>$null
+    if ($extensions -match "(?i)^$([regex]::Escape($ExtensionId))$") {
+        Write-Host "[OK] VS Code extension: $ExtensionId" -ForegroundColor Green
+        return
+    }
+
+    Write-Host "Installing VS Code extension: $ExtensionId" -ForegroundColor Cyan
+    & $CodeCommand --install-extension $ExtensionId --force
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Could not install $ExtensionId automatically; install it from the VS Code Extensions panel." -ForegroundColor Yellow
     }
 }
 
@@ -63,15 +85,16 @@ if (-not $code) {
 }
 
 if ($code) {
-    Write-Host "\n==> VS Code extensions" -ForegroundColor Cyan
-    & $code --install-extension ms-vscode-remote.remote-wsl --force
-    & $code --install-extension OpenAI.chatgpt --force
+    Write-Host "`n==> VS Code extensions" -ForegroundColor Cyan
+    $codePath = if ($code -is [System.Management.Automation.CommandInfo]) { $code.Source } else { [string]$code }
+    Ensure-VSCodeExtension -CodeCommand $codePath -ExtensionId "ms-vscode-remote.remote-wsl"
+    Ensure-VSCodeExtension -CodeCommand $codePath -ExtensionId "OpenAI.chatgpt"
 } else {
     Write-Host "VS Code installed, but 'code' CLI was not found in this PowerShell session." -ForegroundColor Yellow
     Write-Host "Open VS Code once, then install extensions: ms-vscode-remote.remote-wsl and OpenAI.chatgpt." -ForegroundColor Yellow
 }
 
-Write-Host "\n==> WSL2 networking" -ForegroundColor Cyan
+Write-Host "`n==> WSL2 networking" -ForegroundColor Cyan
 $wslConfigPath = Join-Path $env:USERPROFILE ".wslconfig"
 $configLines = [System.Collections.Generic.List[string]]::new()
 if (Test-Path $wslConfigPath) {
@@ -84,7 +107,7 @@ Set-Content -Path $wslConfigPath -Value $configLines -Encoding ascii
 Write-Host "Configured $wslConfigPath with mirrored networking, DNS tunneling, and Windows proxy inheritance." -ForegroundColor Green
 Write-Host "These settings take effect after 'wsl --shutdown' or a Windows reboot." -ForegroundColor Yellow
 
-Write-Host "\n==> WSL2 / Ubuntu" -ForegroundColor Cyan
+Write-Host "`n==> WSL2 / Ubuntu" -ForegroundColor Cyan
 $hasUbuntu = $false
 try {
     $distros = (wsl -l -q 2>$null) -join "`n"
@@ -94,7 +117,7 @@ try {
 if (-not $hasUbuntu) {
     Write-Host "Ubuntu WSL not detected. Starting installation..." -ForegroundColor Yellow
     wsl --install -d Ubuntu
-    Write-Host "\nIf Windows requests a reboot, reboot now." -ForegroundColor Yellow
+    Write-Host "`nIf Windows requests a reboot, reboot now." -ForegroundColor Yellow
     Write-Host "After reboot, run: wsl -l -v" -ForegroundColor Cyan
     Write-Host "If no distribution is installed, run: wsl --install -d Ubuntu" -ForegroundColor Cyan
     Write-Host "Then run: wsl --shutdown; wsl -d Ubuntu" -ForegroundColor Cyan
@@ -106,5 +129,6 @@ wsl --set-default-version 2
 Write-Host "Ubuntu already exists. Current WSL distributions:" -ForegroundColor Green
 wsl -l -v
 
-Write-Host "\nHost bootstrap complete." -ForegroundColor Green
-Write-Host "Next, in Ubuntu WSL run the kit's wsl/02-bootstrap-wsl.sh." -ForegroundColor Cyan
+Write-Host "`nHost bootstrap complete." -ForegroundColor Green
+Write-Host "Next, in Ubuntu WSL run the kit's wsl/02-bootstrap-wsl.sh, then 03-setup-sglang-workspace.sh." -ForegroundColor Cyan
+Write-Host "Recommended daily UI: from ~/code/sglang run code ., confirm WSL: Ubuntu, then use the Codex sidebar." -ForegroundColor Cyan

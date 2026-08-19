@@ -2,6 +2,20 @@
 
 The tools in this kit solve different retrieval problems. They should not all run for every question. For which behaviors are automatic versus manual, see [Automation and enforcement](AUTOMATION.md).
 
+## VS Code extension and tooling
+
+The extension-first workflow uses the same WSL-side repository tooling layer:
+
+```text
+~/.codex/config.toml        -> model defaults + Semble MCP
+AGENTS.override.md          -> search/log/handoff rules
+.agents/skills/             -> task-specific workflows
+.codex/                     -> handoffs, goals, reducers
+```
+
+Open the repository with `cd ~/code/sglang && code .` and start a new Codex local session in the sidebar. You do not need to run `cx` at the same time. `cx` is an independent CLI session. See [VS Code + Codex](VSCODE.md).
+
+
 ## Search ladder
 
 ```text

@@ -14,6 +14,21 @@ The short answer is: routine prompts should describe the engineering objective, 
 
 Instruction-enforced behavior is automatic in normal Codex use, but it is not a shell-level security boundary. The model is responsible for obeying the repo instructions.
 
+## Extension vs CLI
+
+The recommended UI is the Codex VS Code extension in a `WSL: Ubuntu` window. Repository instructions, repo-local skills, handoff/Goal files, and the WSL-side Semble MCP configuration are intended to apply there as well as in CLI sessions.
+
+| Mechanism | VS Code extension | CLI | Notes |
+|---|---|---|---|
+| `AGENTS.override.md` / repo skills | Yes | Yes | Instruction layer; no prompt boilerplate needed |
+| Semble MCP from `~/.codex/config.toml` | Yes, after restart/new session | Yes | Same WSL Codex configuration |
+| Large-log reduction rule | Yes | Yes | Instruction-enforced |
+| Review handoff create/consume rule | Yes | Yes | Instruction-enforced |
+| `cxl/cx/cxh/cxx` aliases | No | Yes | Shell aliases only |
+| prompt-guard hook | Client/version dependent | Reference path | Do not rely on it as the only IDE safeguard |
+
+The extension and CLI do **not** share a live conversation. Opening `cx` does not connect that CLI session to the VS Code sidebar.
+
 ## Large logs - automatic by rule
 
 You normally write only the task:

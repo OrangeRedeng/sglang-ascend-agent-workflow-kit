@@ -94,6 +94,21 @@ link_skill "$ASCEND_OFFICIAL/skills/npu-adapter-reviewer" "official-npu-adapter-
 link_skill "$ASCEND_OFFICIAL/skills/ascend-profiling-anomaly" "official-ascend-profiling-anomaly"
 link_skill "$ASCEND_OFFICIAL/skills/hccl-test" "official-hccl-test"
 
+log "VS Code Codex extension"
+if command -v code >/dev/null 2>&1; then
+  if ! code --list-extensions 2>/dev/null | grep -qi '^openai\.chatgpt$'; then
+    code --install-extension OpenAI.chatgpt --force || \
+      echo "Warning: install OpenAI.chatgpt from the VS Code Extensions panel." >&2
+  fi
+  if code --list-extensions 2>/dev/null | grep -qi '^openai\.chatgpt$'; then
+    echo "Codex/OpenAI VS Code extension detected."
+  else
+    echo "Warning: OpenAI.chatgpt is still not visible to the VS Code CLI." >&2
+  fi
+else
+  echo "Warning: 'code' CLI not found. Install VS Code + Remote - WSL on Windows." >&2
+fi
+
 log "Verification"
 cd "$SGLANG"
 printf 'Repo: %s\n' "$(git remote get-url origin)"
@@ -101,5 +116,5 @@ printf 'Branch: %s\n' "$(git branch --show-current)"
 printf '\nSkills:\n'
 find -L .agents/skills -maxdepth 2 -name SKILL.md -print | sort
 
-printf '\nReady. Open with:\n  cd %q\n  code .\n\nStart default Codex:\n  cx\n' "$SGLANG"
+printf '\nReady. Recommended daily workflow:\n  cd %q\n  code .\n\nIn VS Code:\n  1. confirm the lower-left indicator says WSL: Ubuntu\n  2. open the Codex sidebar\n  3. start a new local session\n\nCLI is optional and independent:\n  cx\n' "$SGLANG"
 printf '\nOptional kernel-specific skills:\n  %s/wsl/04-install-ascend-kernel-skills-optional.sh --help\n' "$KIT_ROOT"

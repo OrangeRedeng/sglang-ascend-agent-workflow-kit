@@ -131,6 +131,20 @@ alias cxx='codex --profile sglang-xhigh'
 EOF
 fi
 
+log "VS Code / Codex extension"
+if command -v code >/dev/null 2>&1; then
+  if ! code --list-extensions 2>/dev/null | grep -qi '^openai\.chatgpt$'; then
+    echo "OpenAI.chatgpt is not visible to the current VS Code CLI; attempting installation."
+    code --install-extension OpenAI.chatgpt --force || \
+      echo "Warning: install OpenAI.chatgpt manually from the VS Code Extensions panel." >&2
+  else
+    echo "OpenAI.chatgpt extension detected."
+  fi
+else
+  echo "Warning: VS Code 'code' CLI is not available inside WSL yet." >&2
+  echo "Open VS Code on Windows with the Remote - WSL extension, then rerun verification." >&2
+fi
+
 log "Git conflict ergonomics"
 git config --global rerere.enabled true
 git config --global rerere.autoupdate true
@@ -154,4 +168,17 @@ fi
 codex --version
 command -v semble
 
-printf '\nDone. Run:\n  source ~/.bashrc\n  gh auth login\n  codex\n\nThen use /hooks in Codex and trust the prompt guard if prompted.\n'
+printf '
+Done. Next:
+  source ~/.bashrc
+  gh auth login
+  ./wsl/03-setup-sglang-workspace.sh   # run from the kit directory
+
+Recommended daily UI after workspace setup:
+  cd ~/code/sglang
+  code .
+  # confirm VS Code shows WSL: Ubuntu, then use the Codex sidebar
+
+CLI remains optional:
+  cx
+'

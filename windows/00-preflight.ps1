@@ -16,6 +16,19 @@ Show-Command wsl
 Show-Command git
 Show-Command code
 
+$codeCmd = Get-Command code -ErrorAction SilentlyContinue
+if ($codeCmd) {
+    Write-Host "`n=== VS Code extensions ===" -ForegroundColor Cyan
+    $extensions = & $codeCmd.Source --list-extensions 2>$null
+    foreach ($ext in @("ms-vscode-remote.remote-wsl", "OpenAI.chatgpt")) {
+        if ($extensions -match "(?i)^$([regex]::Escape($ext))$") {
+            Write-Host ("[OK] {0}" -f $ext) -ForegroundColor Green
+        } else {
+            Write-Host ("[MISSING] {0}" -f $ext) -ForegroundColor Yellow
+        }
+    }
+}
+
 Write-Host "`n=== WSL status ===" -ForegroundColor Cyan
 $wslFeatureEnabled = $false
 $vmPlatformEnabled = $false

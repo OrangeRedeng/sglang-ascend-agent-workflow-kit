@@ -149,3 +149,56 @@ cx
 ```
 
 Do not perform SGLang work from `System32`.
+
+
+## VS Code opens SGLang without `WSL: Ubuntu`
+
+Close that window and reopen from Ubuntu:
+
+```bash
+cd ~/code/sglang
+code .
+```
+
+The lower-left VS Code remote indicator should show `WSL: Ubuntu`. The repository should be under `/home/<user>/code/sglang`, not `/mnt/c/...`.
+
+## Codex extension is missing or disabled
+
+The Windows bootstrap installs `OpenAI.chatgpt`. Verify on Windows:
+
+```powershell
+code --list-extensions | Select-String -Pattern "openai.chatgpt" -CaseSensitive:$false
+```
+
+If it is missing:
+
+```powershell
+code --install-extension OpenAI.chatgpt --force
+```
+
+Then reopen the SGLang WSL window. If VS Code offers **Install in WSL: Ubuntu**, accept it.
+
+## Codex extension does not see the WSL config or Semble
+
+Confirm these files/commands from the integrated WSL terminal:
+
+```bash
+pwd
+ls -l ~/.codex/config.toml
+which semble
+```
+
+`pwd` should be under `~/code/sglang`. After changing `~/.codex/config.toml` or `~/.codex/.env`, restart the Codex extension/VS Code window and start a new local session.
+
+If Semble still fails:
+
+```bash
+uvx --from "semble[mcp]" semble --version
+semble search "attention backend selection" ~/code/sglang --top-k 1
+```
+
+Then restart the extension again.
+
+## `cx` works but the VS Code sidebar looks unrelated
+
+This is expected if both are open: CLI and extension are separate clients/sessions. Do not use `cx` as a way to attach Codex to VS Code. For the recommended workflow, open `code .` from `~/code/sglang` and use a new local session in the Codex sidebar.

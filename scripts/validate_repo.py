@@ -23,6 +23,7 @@ for path in [
     "ACKNOWLEDGEMENTS.md",
     "CONTRIBUTING.md",
     "docs/INSTALLATION.md",
+    "docs/VSCODE.md",
     "docs/AUTOMATION.md",
     "docs/WORKFLOW.md",
     "docs/TOOLING.md",
@@ -72,11 +73,31 @@ contracts = {
     "repo/.agents/skills/sglang-pr-review/SKILL.md": [
         "write `.codex/handoffs/pr-<N>-review.md` before stopping",
     ],
+    "docs/VSCODE.md": [
+        "recommended daily interface",
+        "WSL: Ubuntu",
+        "The current CLI conversation and the current extension conversation are separate sessions",
+    ],
     "docs/AUTOMATION.md": [
         "Hard-enforced",
         "Instruction-enforced",
         "Large logs - automatic by rule",
         "Handoffs - automatic by rule",
+        "Extension vs CLI",
+    ],
+    "README.md": [
+        "Recommended daily workflow: VS Code extension",
+        "Do not run `cx` just to",
+    ],
+    "windows/01-bootstrap-windows.ps1": [
+        "Ensure-VSCodeExtension",
+        "OpenAI.chatgpt",
+        "ms-vscode-remote.remote-wsl",
+    ],
+    "wsl/03-setup-sglang-workspace.sh": [
+        "VS Code Codex extension",
+        "start a new local session",
+        "CLI is optional and independent",
     ],
 }
 for rel, needles in contracts.items():

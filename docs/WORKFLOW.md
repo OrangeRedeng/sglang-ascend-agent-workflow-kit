@@ -1,5 +1,9 @@
 # Workflow
 
+## Recommended interface
+
+Use **VS Code + WSL + Codex extension** as the default daily workflow. Open SGLang with `cd ~/code/sglang && code .`, then work from the Codex sidebar. Use the CLI (`cx`, `cxh`, etc.) only when a terminal session is intentionally preferable. See [VS Code + Codex](VSCODE.md).
+
 ## Core rule
 
 **Chat = working memory. Git = code state. Handoff/Goal files = durable memory.**
@@ -155,7 +159,9 @@ Sol / xhigh
   escalation only after a focused high-effort investigation fails.
 ```
 
-Aliases:
+For the VS Code extension, Terra/medium comes from the main `~/.codex/config.toml`; switch to Sol/high in the extension UI for genuinely hard tasks.
+
+CLI-only aliases:
 
 ```bash
 cxl
@@ -164,7 +170,7 @@ cxh
 cxx
 ```
 
-The helper router also supports task kinds:
+The CLI helper router also supports task kinds:
 
 ```bash
 cx-task review

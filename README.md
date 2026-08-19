@@ -7,8 +7,9 @@ The kit is built around one principle: **keep long-lived engineering state in Gi
 ## What this repository configures
 
 - Windows 11 + WSL2 Ubuntu with VPN-friendly mirrored networking.
-- Codex CLI profiles for routine, deep-review, and escalation work.
-- A prompt guard that blocks wasteful standalone `git push` prompts.
+- Codex VS Code extension as the recommended daily UI, backed by the same WSL Codex configuration, repo instructions, skills, and MCP servers.
+- Codex CLI profiles for terminal-first, remote, and diagnostic work.
+- A CLI prompt guard that blocks wasteful standalone `git push` prompts; extension-side hook behavior is treated as client/version dependent.
 - Semble MCP for conceptual code search, with a longer startup timeout and first-run prewarm.
 - Optional Serena MCP for symbol-aware callers/references/refactoring.
 - SGLang-local session, handoff, Goal, CI, log-analysis, and Ascend skills.
@@ -26,7 +27,7 @@ The largest savings usually come from session lifecycle and retrieval discipline
 | **Handoff artifacts** | Automatically record local actionable review/investigation findings for the next session; implementation consumes the compact artifact instead of re-reviewing | **High** when one task feeds another | Review and implementation stay independent but connected |
 | **Goal + experiment ledger** | Keeps benchmark state, hypotheses, failures, and next steps in files instead of chat history | **High** for multi-round performance work | Long optimization loops become reproducible and resumable |
 | **Model routing** | Uses Luna/Terra for routine work and Sol only where deeper reasoning is justified | **Direct cost reduction** | Less manual model switching; expensive reasoning is reserved for hard work |
-| **Prompt guard** | Blocks standalone `git push`-style prompts before they become model turns | **High per avoided trivial turn in a long session** | Simple Git actions stay in the terminal where they belong |
+| **CLI prompt guard** | Blocks standalone `git push`-style prompts before they become model turns in the CLI reference path | **High per avoided trivial turn in a long session** | Simple Git actions stay in the terminal where they belong; IDE users still follow the same terminal-first rule |
 | **Targeted `rg` / Git first** | Uses exact search when an identifier, error, path, PR, or commit is already known | **Medium to high** | Faster navigation; less tool wandering |
 | **Semble** | Returns small semantic code chunks for conceptual questions instead of grep + full-file reads | **Potentially high retrieval savings** | Natural-language code discovery when the symbol/path is unknown |
 | **Serena (optional)** | Uses LSP-backed symbol relationships for callers, references, implementations, and refactors | **Medium**, especially in large cross-file tasks | IDE-like navigation and safer structural edits |
@@ -143,13 +144,13 @@ cd ~/code/sglang
 code .
 ```
 
-Start Codex from the SGLang repository, not from `C:\Windows\System32` or another unrelated directory:
+### Recommended daily workflow: VS Code extension
 
-```bash
-cx
-```
+Open the repository with `code .` **from WSL**. In VS Code, confirm the lower-left remote indicator says `WSL: Ubuntu`, then open the Codex sidebar and start a new local session. The extension uses the WSL-side Codex configuration (`~/.codex/config.toml`) after restart/new session, so the default remains Terra/medium with Semble MCP and the repository rules/skills.
 
-Profiles:
+Do not run `cx` just to “connect Codex to VS Code”. The extension and CLI are separate clients. Use the extension as the default UI; use `cx` only when you intentionally want a terminal Codex session.
+
+CLI profiles:
 
 ```text
 cxl  -> Luna / low       cheap, mechanical work
@@ -161,6 +162,7 @@ cxx  -> Sol / xhigh      escalation only
 ## Documentation
 
 - [Installation](docs/INSTALLATION.md) - Windows, WSL, VPN, Codex, Semble, workspace setup.
+- [VS Code + Codex](docs/VSCODE.md) - recommended extension-first workflow and verification.
 - [Automation](docs/AUTOMATION.md) - what happens automatically, what is instruction-enforced, and what remains manual.
 - [Workflow](docs/WORKFLOW.md) - session boundaries, handoffs, Goals, model routing, tests, Git discipline.
 - [Tooling](docs/TOOLING.md) - `rg`, Git, Semble, Serena, model-history skills, prompt guard.
