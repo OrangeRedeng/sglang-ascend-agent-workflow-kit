@@ -1,214 +1,253 @@
 # Automation and enforcement
 
-This page answers a practical question: **what happens automatically, and what still needs to be written in the prompt?**
+This page answers one practical question: **what happens automatically, and what must you put in the prompt?**
 
-The short answer is: routine prompts should describe the engineering objective, not the workflow machinery. The repository rules and skills decide how to search, when to reduce logs, and when to create/consume handoffs.
+The default rule is: describe the engineering objective. Do not repeat the workflow machinery in every prompt.
 
-## Three levels of automation
+## Enforcement levels
 
-| Level | Meaning | Examples in this kit |
+| Level | Meaning | Current examples |
 |---|---|---|
-| **Hard-enforced** | Code/hook blocks or performs the behavior before/without a model turn | standalone `git push` prompt guard |
-| **Instruction-enforced** | `AGENTS.override.md` / `SKILL.md` says the model **MUST** follow the behavior | large-log reduction, handoff creation/consumption, search routing |
-| **Manual / optional** | A human chooses to enable or invoke the capability | Serena installation, optional AscendC/Triton skills |
+| **Hard / hook-driven** | Code runs before the model turn/session and injects or blocks workflow state | automatic handoff discovery; standalone `git push` prompt guard |
+| **Instruction-enforced** | `AGENTS.override.md` / `SKILL.md` says the model **MUST** perform a step | large-log reducer, handoff creation, handoff consumption/marking, search routing, strategy-reversal session split |
+| **Manual / optional** | Human explicitly enables/uses it | Serena, optional Triton/AscendC skills, creating a parallel Git worktree |
 
-Instruction-enforced behavior is automatic in normal Codex use, but it is not a shell-level security boundary. The model is responsible for obeying the repo instructions.
+The Codex VS Code extension and CLI both use the installed hook configuration when supported by the running Codex build. This kit installs the same hooks under `~/.codex/hooks.json` and `~/.codex/hooks/`.
 
-## Extension vs CLI
+## Handoff discovery - automatic by hook
 
-The recommended UI is the Codex VS Code extension in a `WSL: Ubuntu` window. Repository instructions, repo-local skills, handoff/Goal files, and the WSL-side Semble MCP configuration are intended to apply there as well as in CLI sessions.
+You no longer need to type a handoff path in a normal implementation session.
 
-| Mechanism | VS Code extension | CLI | Notes |
-|---|---|---|---|
-| `AGENTS.override.md` / repo skills | Yes | Yes | Instruction layer; no prompt boilerplate needed |
-| Semble MCP from `~/.codex/config.toml` | Yes, after restart/new session | Yes | Same WSL Codex configuration |
-| Large-log reduction rule | Yes | Yes | Instruction-enforced |
-| Review handoff create/consume rule | Yes | Yes | Instruction-enforced |
-| `cxl/cx/cxh/cxx` aliases | No | Yes | Shell aliases only |
-| prompt-guard hook | Client/version dependent | Reference path | Do not rely on it as the only IDE safeguard |
-
-The extension and CLI do **not** share a live conversation. Opening `cx` does not connect that CLI session to the VS Code sidebar.
-
-## Large logs - automatic by rule
-
-You normally write only the task:
+A handoff created by a review/investigation lives under:
 
 ```text
-Analyze /tmp/npu-ci.log and find the root cause.
+.codex-artifacts/handoffs/
 ```
 
-You do **not** need to add:
+New handoffs carry metadata such as:
+
+```yaml
+status: open
+kind: pr-review
+pr: 34855
+branch: pr/owner/34855
+repo: <origin URL>
+worktree: /home/user/code/sglang
+reviewed_head: <sha>
+created_at: <UTC timestamp>
+```
+
+### What happens at session start
+
+The installed `SessionStart` hook runs the local resolver:
 
 ```text
-Use extract-log-context.py first.
+new Codex session
+  -> .codex/scripts/resolve-handoff.py
+  -> current PR match
+     else current branch match
+     else newest open handoff for this worktree
+     else only open handoff for this repository
+  -> selected path is injected into Codex context
 ```
 
-Expected flow for a local/downloaded log:
+The hook injects only the **path + instruction**, not the full handoff body, so startup context stays small.
+
+### What happens on an implementation-like prompt
+
+`UserPromptSubmit` performs a second task-aware check for prompts such as:
 
 ```text
-prompt references log
-  -> Codex checks file size / line count without reading the body
-  -> if >= 1 MiB OR >= 10,000 lines: raw full read is forbidden by rule
-  -> .codex/scripts/extract-log-context.py <log>
-  -> .codex/logs/<name>.focused.txt
-  -> Codex reads focused artifact
-  -> raw log is read only in narrow ranges when a concrete fact is missing
+Address the review findings.
+Fix the remaining regression.
+Apply the requested changes.
 ```
 
-The reducer now writes the focused log to a file by default instead of printing hundreds/thousands of reduced lines into the model tool output.
+If an open handoff matches, the path is injected again with a stronger instruction: read it before broad exploration and do not redo the broad review.
 
-Manual use is still available:
+So this is sufficient:
+
+```text
+Address the findings from the review.
+```
+
+You should not need:
+
+```text
+Address .codex-artifacts/handoffs/pr-34855-review.md
+```
+
+### Handoff lifecycle
+
+After all actionable items are completed or proven obsolete:
 
 ```bash
-cd ~/code/sglang
-.codex/scripts/extract-log-context.py /tmp/npu-ci.log
+python3 .codex/scripts/handoff-status.py consume \
+  .codex-artifacts/handoffs/pr-34855-review.md
 ```
 
-Typical output:
+The address-review rule requires Codex to do this automatically when completion is clear.
 
-```text
-Focused log: /home/user/code/sglang/.codex/logs/npu-ci.log.focused.txt
-Source: 7342812 bytes, 68144 lines
-Matches: 407 total, 120 included
+Consumed handoffs are ignored by normal resolver discovery.
+
+If implementation is only partial, keep `status: open`.
+
+Manual resolver diagnostics:
+
+```bash
+python3 .codex/scripts/resolve-handoff.py --json
 ```
 
-Then inspect the focused file, not the raw multi-megabyte log.
+Manual reopen:
 
-### What counts as "large"?
-
-The default contract is:
-
-```text
->= 1 MiB OR >= 10,000 lines
+```bash
+python3 .codex/scripts/handoff-status.py reopen <handoff.md>
 ```
 
-A smaller but extremely repetitive/profiler-style log may still be reduced first.
+## Handoff creation - automatic by instruction
 
-## Handoffs - automatic by rule
+For a report-only PR review or bounded investigation, if actionable findings exist and unresolved GitHub review threads are not already the authoritative record, Codex **MUST** create a handoff before stopping.
 
-A handoff exists to move **actionable state** to a new session without carrying the review/investigation transcript.
+PR example:
 
-### Review session
-
-A normal prompt can remain short:
-
-```text
-Review PR #31320. Report only.
+```bash
+.codex/scripts/new-handoff.sh 34855
 ```
 
-If Codex finds actionable issues and those issues are not already authoritative unresolved GitHub review threads, the PR-review skill **must** create:
-
-```text
-.codex/handoffs/pr-31320-review.md
-```
-
-before the review session ends.
-
-If the review finds no actionable issue, no empty handoff is created.
-
-If the authoritative findings already live in GitHub unresolved review threads, those threads remain the source of truth and a duplicate local handoff is not required.
-
-### Implementation session
-
-A new session can then receive a short objective:
-
-```text
-Address the findings from PR #31320 review.
-```
-
-Expected flow:
-
-```text
-new implementation session
-  -> unresolved GitHub review threads if authoritative
-     OR matching .codex/handoffs/pr-31320-review.md
-  -> re-verify findings against current HEAD
-  -> implement only actionable findings
-  -> targeted validation
-  -> re-check findings against diff
-  -> stop
-```
-
-The implementation session must **not** redo the broad PR review just to reconstruct context.
-
-### Non-PR investigation handoff
-
-For a bounded investigation where implementation is intentionally deferred:
+Generic investigation:
 
 ```bash
 .codex/scripts/new-handoff.sh scheduler-rank-desync
 ```
 
-creates:
+The user does not need to request handoff creation explicitly.
+
+## Mutable state location
+
+Runtime artifacts deliberately do **not** live under `.codex/`:
 
 ```text
-.codex/handoffs/scheduler-rank-desync.md
+.codex/                    static scripts/templates
+.codex-artifacts/          mutable local state
+  handoffs/
+  goals/
+  logs/
 ```
 
-Numeric arguments retain the PR convention:
+This matters for the VS Code Codex sandbox, where `.codex/` may be protected/read-only. `.codex-artifacts/` is created as writable local state and excluded through `.git/info/exclude`.
+
+## Large logs - automatic by rule
+
+For a local/downloaded log:
+
+```text
+>= 1 MiB OR >= 10,000 lines
+```
+
+Codex must:
+
+```text
+size check
+  -> MUST NOT full-read raw log
+  -> .codex/scripts/extract-log-context.py <log>
+  -> .codex-artifacts/logs/<name>.focused.txt
+  -> inspect focused artifact
+  -> narrow raw ranges only if a concrete fact is still missing
+```
+
+Normal prompt:
+
+```text
+Analyze /tmp/npu-ci.log and find the root cause.
+```
+
+No `use the reducer` wording is required.
+
+## Session lifecycle - automatic rule, not automatic session creation
+
+Codex cannot silently move your current conversation into a new user-visible session. The rule therefore tells the agent when to stop and tells you to continue in a new session.
+
+```text
+same goal + same strategy -> continue
+same goal + new strategy  -> NEW SESSION
+new goal                  -> NEW SESSION
+```
+
+A strategy reversal includes:
+
+- undoing the approach just implemented;
+- changing from broad per-file edits to a centralized implementation;
+- restoring upstream behavior after pursuing a different design;
+- changing the root-cause hypothesis enough that prior exploration is no longer the right working context.
+
+## Parallel sessions
+
+Use **one active Codex session per Git worktree**.
+
+If two tasks need to run concurrently, create separate worktrees:
 
 ```bash
-.codex/scripts/new-handoff.sh 31320
-# -> .codex/handoffs/pr-31320-review.md
+git worktree add ../sglang-pr34855 <branch>
+git worktree add ../sglang-ci-analysis <branch-or-commit>
 ```
+
+Do not run two editing/review sessions against the same worktree: Git state, local diffs and handoff state can race.
 
 ## Search routing - automatic by instruction
 
-You normally ask the engineering question, for example:
-
 ```text
-Find why the NPU attention backend is selected incorrectly during decode.
-```
-
-The repo rule routes retrieval roughly as follows:
-
-```text
-exact symbol/path/error -> rg
+exact path/symbol/error -> rg/direct navigation
 known PR/commit         -> git show/diff
-model history           -> model-pr-history-knowledge
+model-history question  -> model-pr-history skill
 unknown concept         -> Semble
 known symbol relations  -> Serena (if installed)
 ```
 
-You only need to name a tool explicitly when the method itself is part of the task, for example "use Serena to enumerate all callers before editing".
+Once a concrete symbol is identified, semantic discovery should stop unless new evidence requires it.
 
-## Goal artifacts - model-guided, intentionally explicit
+## Goal artifacts - intentionally explicit
 
-Long performance/kernel loops should use a Goal and durable ledger. This is not forced for ordinary fixes because it would create unnecessary ceremony.
-
-Use it when the task is genuinely iterative:
+Long performance/kernel loops use:
 
 ```text
 /plan
 /goal <objective>
 ```
 
-and create the artifact structure with:
+and:
 
 ```bash
-.codex/scripts/new-goal.sh <goal-slug>
+.codex/scripts/new-goal.sh <slug>
 ```
 
-## What should be in your prompt?
-
-Prefer this:
+Runtime state is written to:
 
 ```text
-Analyze the attached NPU CI log and identify the root cause.
+.codex-artifacts/goals/<slug>/
 ```
+
+Ordinary fixes should not pay this ceremony.
+
+## What should be in the prompt?
+
+Prefer:
 
 ```text
 Review PR #31320. Report only.
 ```
 
 ```text
-Address the findings from PR #31320 review.
+Address the review findings.
 ```
-
-Avoid repeating infrastructure instructions such as:
 
 ```text
-Use rg first, then Semble, reduce large logs, create a handoff, do not reread the review...
+Analyze this NPU CI log and identify the root cause.
 ```
 
-Those policies belong in the repository rules/skills and are already encoded there.
+Avoid repeating:
+
+```text
+use rg first; use Semble later; reduce logs; find the handoff; do not rereview...
+```
+
+Those rules belong to the repository workflow layer.

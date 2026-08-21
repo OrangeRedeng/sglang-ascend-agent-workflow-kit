@@ -3,13 +3,31 @@
 The upstream repository's agent conventions live in `.claude/rules/` and `.claude/skills/`.
 Load only the rules/skills relevant to the touched component; do not dump all of them into context.
 
-## Scope discipline
+## Scope and session discipline
 
 - One objective per session unless this is a controlled evidence-driven Goal.
+- **Same goal + same implementation strategy** -> continue the current session.
+- **Same goal + a materially different implementation strategy** -> stop and continue in a **new session**. This includes replacing a many-file fix with a central fix, undoing the just-implemented approach, restoring upstream behavior after pursuing another approach, or changing the root-cause hypothesis.
+- **New objective** -> new session.
+- Use **one active Codex session per Git worktree**. If work must run in parallel, create another `git worktree`; do not let two Codex sessions edit/review the same worktree concurrently.
 - PR review means report-only unless the prompt explicitly asks to edit.
 - Conflict resolution means conflicts only; do not also refactor, address unrelated comments, or update docs.
 - Address-review work means actionable feedback only.
 - Stop when the requested objective and minimal validation are complete.
+
+## Mandatory implementation preflight
+
+For any code-changing implementation/fix/address-review task, **before broad exploration**:
+
+1. Run `python3 .codex/scripts/resolve-handoff.py --json`.
+2. If it returns `selected`, **MUST** read that handoff first unless the current task is clearly unrelated.
+3. Re-verify its findings against current HEAD; skip stale/already-fixed items.
+4. Do **not** redo a broad PR review just to reconstruct context.
+5. When every actionable item is completed or proven obsolete, mark the handoff consumed:
+   `python3 .codex/scripts/handoff-status.py consume <handoff-path>`.
+6. If work is only partially complete, leave the handoff `status: open` and update its actionable state rather than marking it consumed.
+
+The Codex `SessionStart` and `UserPromptSubmit` hooks also run this resolver automatically and inject the selected path into context. This preflight remains the fallback contract if hooks are unavailable or ignored.
 
 ## SGLang rules
 
@@ -40,28 +58,29 @@ For a large local or downloaded CI/NPU log:
 1. Check size/line count without reading the body (`wc -c`, `wc -l`, `stat`, or equivalent).
 2. **MUST NOT** `cat`, `Get-Content`, or otherwise read the whole raw log first.
 3. **MUST** run `.codex/scripts/extract-log-context.py <log-file>` first.
-4. Read the generated focused artifact under `.codex/logs/`.
+4. Read the generated focused artifact under `.codex-artifacts/logs/`.
 5. Read raw-log ranges only when the focused artifact identifies a concrete missing fact/window that requires them.
 6. Preserve the original log unchanged.
 
 If a huge log is already present in conversation context, do not quote/replay it or request it again. Work from the available high-signal sections and use a local/downloaded copy with the reducer when further inspection is needed.
 
-## Handoff contract - mandatory when findings are local
+## Handoff contract
 
-Handoffs transfer **decisions and actionable findings**, not the review transcript.
+Handoffs transfer **decisions and actionable findings**, not the review transcript. Mutable runtime state lives in `.codex-artifacts/`; `.codex/` contains only static scripts/templates and may be read-only in the VS Code sandbox.
 
 ### Produce a handoff
 
 Before ending a report-only PR review or bounded investigation:
 
-- If there are actionable findings/next changes and they are **not already represented by authoritative unresolved GitHub review threads**, **MUST** write a compact handoff to `.codex/handoffs/`.
-- For PR review, prefer `.codex/handoffs/pr-<N>-review.md`.
-- For a non-PR investigation, use a short descriptive slug such as `.codex/handoffs/scheduler-rank-desync.md`.
+- If there are actionable findings/next changes and they are **not already represented by authoritative unresolved GitHub review threads**, **MUST** write a compact handoff under `.codex-artifacts/handoffs/`.
+- For PR review, prefer `.codex-artifacts/handoffs/pr-<N>-review.md` via `.codex/scripts/new-handoff.sh <N>`.
+- For a non-PR investigation, use `.codex/scripts/new-handoff.sh <short-slug>`.
 - If there are no actionable findings, do not create an empty handoff.
 - If GitHub unresolved review threads are the authoritative record, do not duplicate them into a local handoff.
 
-Every handoff must contain only:
-- source/PR and reviewed commit when known;
+Every new handoff carries metadata used by auto-discovery: `status`, `kind`, PR, branch, repository, worktree, reviewed HEAD, and creation time.
+
+Every handoff body contains only:
 - severity/priority;
 - file and symbol;
 - root cause/problem;
@@ -72,15 +91,24 @@ Every handoff must contain only:
 
 ### Consume a handoff
 
-When starting implementation/address-review work:
-
-1. If authoritative unresolved GitHub review threads exist, use them first.
-2. Otherwise, if a matching `.codex/handoffs/` file exists or is named in the prompt, **MUST** read it before broad exploration.
-3. Re-verify each finding against current HEAD; skip stale/already-fixed items.
-4. Implement only the actionable items. **Do not perform another broad PR review.**
-5. Re-check each item against the resulting diff and record completion in the handoff when practical.
+- Auto-discovery resolution order is: current PR -> current branch -> newest open handoff for the same worktree -> only open handoff for the repository.
+- `status: consumed` handoffs are ignored by normal discovery.
+- Re-check each item against current HEAD and resulting diff.
+- Mark consumed only after all actionable items are completed or obsolete.
 
 Do not use `/fork` as a review-to-implementation handoff; a new session + compact handoff is preferred.
+
+## Durable runtime state
+
+```text
+.codex/                    static scripts/templates; safe if read-only
+.codex-artifacts/          mutable local state; git-excluded and writable
+  handoffs/
+  goals/
+  logs/
+```
+
+Long performance/kernel Goals belong under `.codex-artifacts/goals/` and are created with `.codex/scripts/new-goal.sh <slug>`.
 
 ## Ascend NPU
 

@@ -1,13 +1,25 @@
 {
-  "description": "Block trivial push-only prompts that waste a full Codex turn.",
+  "description": "Session lifecycle guard: auto-discover handoffs and block high-cost trivial push prompts.",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.codex/hooks/session_start.py\"",
+            "timeout": 8,
+            "statusMessage": "Resolving workflow handoff"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
             "command": "python3 \"$HOME/.codex/hooks/prompt_guard.py\"",
-            "timeout": 5,
+            "timeout": 8,
             "statusMessage": "Checking prompt workflow"
           }
         ]

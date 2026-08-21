@@ -9,7 +9,9 @@
 # Session boundaries
 
 - Treat a new objective as a new session unless this is one evidence-driven long-running Goal.
+- Same goal + same strategy may continue; same goal + materially different implementation strategy starts a new session.
 - Do not turn a PR into one permanent conversation: review, implementation, conflicts, comments, CI, and description are separate objectives.
+- Use one active Codex session per Git worktree. Parallel Codex work should use separate `git worktree` directories.
 - Use `/side` for a focused detour and `/compact` only when continuing the same objective.
 
 # Git

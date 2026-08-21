@@ -3,45 +3,64 @@ set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
   echo "Usage: $0 <PR-number|slug>" >&2
-  echo "Examples:" >&2
-  echo "  $0 31320" >&2
-  echo "  $0 scheduler-rank-desync" >&2
+  echo "Examples: $0 31320 | $0 scheduler-rank-desync" >&2
   exit 2
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
 KEY="$1"
-SRC="$ROOT/.codex/handoffs/TEMPLATE.md"
+SRC="$ROOT/.codex/templates/handoff.md"
+DST_DIR="$ROOT/.codex-artifacts/handoffs"
+mkdir -p "$DST_DIR"
+
+slugify() {
+  printf '%s' "$1" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-' | sed -E 's/-+/-/g; s/^-//; s/-$//'
+}
+
+BRANCH="$(git branch --show-current 2>/dev/null || true)"
+HEAD="$(git rev-parse HEAD 2>/dev/null || true)"
+REPO="$(git remote get-url origin 2>/dev/null || true)"
+BASE="$(git merge-base HEAD origin/main 2>/dev/null || true)"
+CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+WORKTREE="$ROOT"
 
 if [[ "$KEY" =~ ^[0-9]+$ ]]; then
-  DST="$ROOT/.codex/handoffs/pr-${KEY}-review.md"
+  PR="$KEY"
+  KIND="pr-review"
   SOURCE="PR #${KEY} review"
-  PR="#${KEY}"
+  DST="$DST_DIR/pr-${KEY}-review.md"
 else
-  SLUG="$(printf '%s' "$KEY" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-' | sed -E 's/-+/-/g; s/^-//; s/-$//')"
-  if [[ -z "$SLUG" ]]; then
-    echo "Invalid handoff slug: $KEY" >&2
-    exit 2
-  fi
-  DST="$ROOT/.codex/handoffs/${SLUG}.md"
+  SLUG="$(slugify "$KEY")"
+  [[ -n "$SLUG" ]] || { echo "Invalid handoff slug: $KEY" >&2; exit 2; }
+  KIND="investigation"
   SOURCE="$SLUG"
-  PR="n/a"
+  DST="$DST_DIR/${SLUG}.md"
+  PR=""
+  if [[ "$BRANCH" =~ ([0-9]{3,})$ ]]; then PR="${BASH_REMATCH[1]}"; fi
 fi
 
-mkdir -p "$(dirname "$DST")"
-if [[ -e "$DST" ]]; then
-  echo "Already exists: $DST" >&2
-  exit 1
-fi
+[[ -f "$SRC" ]] || { echo "Missing template: $SRC" >&2; exit 1; }
+[[ ! -e "$DST" ]] || { echo "Already exists: $DST" >&2; exit 1; }
 
-cp "$SRC" "$DST"
-DATE="$(date +%F)"
-HEAD="$(git rev-parse --short HEAD 2>/dev/null || true)"
-sed -i \
-  -e "s|Source: <PR / issue / investigation>|Source: ${SOURCE}|" \
-  -e "s|PR: <#number or n/a>|PR: ${PR}|" \
-  -e "s|Reviewed HEAD: <sha>|Reviewed HEAD: ${HEAD:-unknown}|" \
-  -e "s|Date: <date>|Date: ${DATE}|" \
-  "$DST"
+{
+  cat <<META
+---
+schema: codex-sglang-handoff/v1
+status: open
+kind: $KIND
+pr: $PR
+branch: $BRANCH
+repo: $REPO
+worktree: $WORKTREE
+base_commit: $BASE
+reviewed_head: $HEAD
+created_at: $CREATED
+consumed_at:
+consumed_head:
+---
 
-echo "$DST"
+META
+  sed "s|Source: <PR / issue / investigation>|Source: ${SOURCE}|" "$SRC"
+} > "$DST"
+
+printf '%s\n' "$DST"

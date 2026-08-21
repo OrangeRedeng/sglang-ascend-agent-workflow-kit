@@ -8,9 +8,10 @@ The extension-first workflow uses the same WSL-side repository tooling layer:
 
 ```text
 ~/.codex/config.toml        -> model defaults + Semble MCP
-AGENTS.override.md          -> search/log/handoff rules
+AGENTS.override.md          -> search/log/handoff/session rules
 .agents/skills/             -> task-specific workflows
-.codex/                     -> handoffs, goals, reducers
+.codex/                     -> static scripts and templates
+.codex-artifacts/           -> writable handoffs, goals and focused logs
 ```
 
 Open the repository with `cd ~/code/sglang && code .` and start a new Codex local session in the sidebar. You do not need to run `cx` at the same time. `cx` is an independent CLI session. See [VS Code + Codex](VSCODE.md).
@@ -138,9 +139,9 @@ Use it to answer questions such as:
 
 Historical evidence is context, not the source of truth for current `main`. Verify conclusions against the target Git commit/PR before editing.
 
-## Prompt guard
+## Prompt/session hooks
 
-`codex/hooks/prompt_guard.py` blocks standalone push-only prompts before model invocation:
+`codex/hooks/session_start.py` automatically discovers an open handoff for the current PR/branch/worktree and injects its path at session start. `codex/hooks/prompt_guard.py` performs a second task-aware handoff check for implementation-like prompts and also blocks standalone push-only prompts before model invocation:
 
 ```text
 push
@@ -149,6 +150,15 @@ push it
 ```
 
 It intentionally does not block richer requests where Git operations are part of an engineering objective.
+
+Manual handoff diagnostics:
+
+```bash
+python3 .codex/scripts/resolve-handoff.py --json
+python3 .codex/scripts/handoff-status.py consume <handoff.md>
+```
+
+Normal users should not need to provide the handoff path in the prompt; the hook injects it.
 
 ## Large logs
 
@@ -161,7 +171,7 @@ log >= 1 MiB OR >= 10,000 lines
   -> check size/line count without reading the body
   -> MUST NOT read the raw log in full
   -> run reducer
-  -> read .codex/logs/<name>.focused.txt
+  -> read .codex-artifacts/logs/<name>.focused.txt
   -> inspect narrow raw ranges only if a concrete fact is missing
 ```
 
@@ -181,7 +191,7 @@ cd ~/code/sglang
 By default it **writes** the reduced artifact instead of dumping it into the tool output:
 
 ```text
-.codex/logs/npu-ci.log.focused.txt
+.codex-artifacts/logs/npu-ci.log.focused.txt
 ```
 
 The terminal receives only a short summary/path. This avoids replacing one huge raw-log read with a huge reduced-log tool response.
@@ -189,7 +199,7 @@ The terminal receives only a short summary/path. This avoids replacing one huge 
 Typical output:
 
 ```text
-Focused log: /home/user/code/sglang/.codex/logs/npu-ci.log.focused.txt
+Focused log: /home/user/code/sglang/.codex-artifacts/logs/npu-ci.log.focused.txt
 Source: 7342812 bytes, 68144 lines
 Matches: 407 total, 120 included
 ```

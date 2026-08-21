@@ -108,8 +108,10 @@ backup_if_exists "$CODEX_HOME/AGENTS.md"
 cp "$KIT_ROOT/codex/AGENTS.md" "$CODEX_HOME/AGENTS.md"
 backup_if_exists "$CODEX_HOME/hooks.json"
 cp "$KIT_ROOT/codex/hooks.json" "$CODEX_HOME/hooks.json"
-cp "$KIT_ROOT/codex/hooks/prompt_guard.py" "$CODEX_HOME/hooks/prompt_guard.py"
-chmod +x "$CODEX_HOME/hooks/prompt_guard.py"
+for hook in prompt_guard.py session_start.py; do
+  cp "$KIT_ROOT/codex/hooks/$hook" "$CODEX_HOME/hooks/$hook"
+done
+chmod +x "$CODEX_HOME/hooks/"*.py
 
 log "CLI router"
 mkdir -p "$HOME/.local/bin"

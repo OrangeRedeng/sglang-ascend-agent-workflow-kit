@@ -72,14 +72,14 @@ def main() -> None:
     # Column 1
     y = BODY_TOP
     card(c, xs[0], y, 122, "START HERE - 4 QUESTIONS",
-         "<b>1. New objective?</b> -> new session.<br/>"
-         "<b>2. Review found actionable local issues?</b> -> handoff before STOP, then new implementation session.<br/>"
-         "<b>3. Large local/downloaded log?</b> -> reducer before any full raw-log read.<br/>"
-         "<b>4. Just Git plumbing?</b> push/status/fetch/switch -> terminal.", BLUE)
+         "<b>1. Same goal + same strategy?</b> -> continue.<br/>"
+         "<b>2. Same goal + new strategy?</b> -> NEW SESSION.<br/>"
+         "<b>3. New objective?</b> -> NEW SESSION.<br/>"
+         "<b>4. Parallel work?</b> -> another git worktree; one active Codex session per worktree.", BLUE)
     y -= 132
     card(c, xs[0], y, 150, "LARGE LOG - MUST REDUCE FIRST",
          "Trigger: <b>&gt;= 1 MiB OR &gt;= 10,000 lines</b>.<br/><br/>"
-         "size check -> <font name='Courier'>extract-log-context.py</font> -> <font name='Courier'>.codex/logs/*.focused.txt</font> -> inspect focused artifact -> narrow raw ranges only if needed.<br/><br/>"
+         "size check -> <font name='Courier'>extract-log-context.py</font> -> <font name='Courier'>.codex-artifacts/logs/*.focused.txt</font> -> inspect focused artifact -> narrow raw ranges only if needed.<br/><br/>"
          "<b>Never read/cat the whole raw log first.</b> You do not need to tell Codex to use the reducer.", RED)
     y -= 160
     card(c, xs[0], y, 120, "SEARCH ROUTING",
@@ -87,11 +87,10 @@ def main() -> None:
 
     # Column 2
     y = BODY_TOP
-    card(c, xs[1], y, 166, "REVIEW -> HANDOFF -> NEW SESSION",
-         "If report-only review/investigation finds actionable issues and GitHub review threads are not already authoritative:<br/><br/>"
-         "review -> <font name='Courier'>.codex/handoffs/...</font> -> STOP -> new implementation session -> re-verify -> patch.<br/><br/>"
-         "Implementation <b>does not redo the broad review</b>.<br/><br/>"
-         "Handoff only stores: severity | file/symbol | root cause | intended change | constraints | validation.", GREEN)
+    card(c, xs[1], y, 166, "HANDOFF AUTO-DISCOVERY",
+         "Review/investigation -> <font name='Courier'>.codex-artifacts/handoffs/...</font> -> STOP.<br/><br/>"
+         "New implementation session -> <b>SessionStart hook resolves PR/branch/worktree</b> -> injects handoff path -> read -> re-verify -> patch -> consume.<br/><br/>"
+         "Normally prompt only: <b>Address the review findings.</b><br/>Do not redo the broad review.", GREEN)
     y -= 176
     card(c, xs[1], y, 130, "SESSION + MODEL ROUTING",
          "<b>Luna/low:</b> metadata, PR description, docs, mechanical.<br/>"
@@ -101,7 +100,7 @@ def main() -> None:
          "Long perf/kernel loop -> <font name='Courier'>/plan</font> + <font name='Courier'>/goal</font> + artifact ledger.", BLUE)
     y -= 140
     card(c, xs[1], y, 96, "DO NOT SPEND A MODEL TURN",
-         "Standalone push/status/fetch/switch -> terminal.<br/>Do not send <font name='Courier'>push</font>, <font name='Courier'>continue</font>, or <font name='Courier'>update</font> in a long thread.<br/>Do not expand scope after the objective is solved.", AMBER)
+         "Standalone push/status/fetch/switch -> terminal.<br/>Strategy reversal (<font name='Courier'>instead / undo / restore</font>) -> <b>NEW SESSION</b>, not another turn in a long thread.<br/>Do not expand scope after the objective is solved.", AMBER)
 
     # Column 3
     y = BODY_TOP
@@ -119,11 +118,12 @@ def main() -> None:
     card(c, xs[2], y, 108, "DAILY UI / QUICK COMMANDS",
          "<b>Default:</b> <font name='Courier'>cd ~/code/sglang &amp;&amp; code .</font> -> WSL: Ubuntu -> Codex sidebar.<br/><br/>"
          "<b>CLI optional:</b> <font name='Courier'>cxl</font> Luna | <font name='Courier'>cx</font> Terra | <font name='Courier'>cxh</font> Sol/high | <font name='Courier'>cxx</font> Sol/xhigh<br/><br/>"
-         "Handoff: <font name='Courier'>.codex/scripts/new-handoff.sh &lt;PR|slug&gt;</font>", GRAY)
+         "Handoff diagnostic: <font name='Courier'>python3 .codex/scripts/resolve-handoff.py --json</font><br/><br/>"
+         "Static: <font name='Courier'>.codex/</font> | Writable: <font name='Courier'>.codex-artifacts/</font>", GRAY)
 
     c.setStrokeColor(BORDER)
     c.line(M, M + FOOTER_H - 5, PAGE_W - M, M + FOOTER_H - 5)
-    draw_para(c, "Chat = working memory. Git = code state. Handoff/Goal files = durable memory. NEW OBJECTIVE = NEW SESSION.", styles["footer"], M, M + 17, PAGE_W - 2 * M)
+    draw_para(c, "Chat = working memory. Git = code state. .codex-artifacts = durable memory. NEW STRATEGY OR NEW OBJECTIVE = NEW SESSION.", styles["footer"], M, M + 17, PAGE_W - 2 * M)
 
     c.save()
     print(OUT)

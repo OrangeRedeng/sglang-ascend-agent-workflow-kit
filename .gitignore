@@ -23,3 +23,6 @@ _tmp*/
 
 # Generated local Codex state if this repository itself is used as a workspace
 .codex-local/
+
+# Runtime workflow artifacts when testing this kit in-place
+.codex-artifacts/

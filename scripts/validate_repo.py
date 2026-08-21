@@ -38,7 +38,14 @@ for path in [
     "scripts/build_print_rules.py",
     "repo/.codex/scripts/extract-log-context.py",
     "repo/.codex/scripts/new-handoff.sh",
-    "repo/.codex/handoffs/TEMPLATE.md",
+    "repo/.codex/templates/handoff.md",
+    "repo/.codex/templates/goal/goal.md",
+    "repo/.codex/scripts/resolve-handoff.py",
+    "repo/.codex/scripts/handoff-status.py",
+    "repo/.codex/scripts/migrate-artifacts.py",
+    "codex/hooks/session_start.py",
+    "wsl/06-update-existing-workspace.sh",
+    "docs/UPDATING.md",
 ]:
     require(path)
 
@@ -67,11 +74,15 @@ contracts = {
         "1 MiB",
         "10,000 lines",
         "MUST NOT",
+        "Same goal + a materially different implementation strategy",
+        "one active Codex session per Git worktree",
+        "resolve-handoff.py --json",
         "**MUST** write a compact handoff",
-        "Do not perform another broad PR review",
+        ".codex-artifacts/handoffs/",
     ],
     "repo/.agents/skills/sglang-pr-review/SKILL.md": [
-        "write `.codex/handoffs/pr-<N>-review.md` before stopping",
+        "new-handoff.sh <N>",
+        ".codex-artifacts/handoffs/pr-<N>-review.md",
     ],
     "docs/VSCODE.md": [
         "recommended daily interface",
@@ -79,15 +90,26 @@ contracts = {
         "The current CLI conversation and the current extension conversation are separate sessions",
     ],
     "docs/AUTOMATION.md": [
-        "Hard-enforced",
+        "Hard / hook-driven",
         "Instruction-enforced",
         "Large logs - automatic by rule",
-        "Handoffs - automatic by rule",
-        "Extension vs CLI",
+        "Handoff discovery - automatic by hook",
     ],
     "README.md": [
         "Recommended daily workflow: VS Code extension",
         "Do not run `cx` just to",
+    ],
+
+    "codex/hooks.json": [
+        "SessionStart",
+        "UserPromptSubmit",
+        "session_start.py",
+        "prompt_guard.py",
+    ],
+    "docs/UPDATING.md": [
+        "06-update-existing-workspace.sh",
+        ".codex-artifacts/handoffs/",
+        "start a **new local Codex session**",
     ],
     "windows/01-bootstrap-windows.ps1": [
         "Ensure-VSCodeExtension",

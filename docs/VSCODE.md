@@ -14,7 +14,8 @@ Windows 11
               -> AGENTS.override.md
               -> .agents/skills/
               -> Semble MCP
-              -> .codex/handoffs/ and .codex/goals/
+              -> .codex/ (static workflow)
+              -> .codex-artifacts/ (writable handoffs/goals/logs)
 ```
 
 The Codex CLI remains installed because it is useful for diagnostics, terminal-first work, SSH/remote use, and profile aliases. It is **not required** to keep a second CLI session running when using the extension.
@@ -78,7 +79,7 @@ When the extension is running in the WSL workspace, the important durable config
 ~/code/sglang/.codex/
 ```
 
-This gives the extension the same default model configuration, Semble MCP configuration, repository instructions, search routing, large-log policy, handoff policy, and SGLang/Ascend skills.
+This gives the extension the same default model configuration, Semble MCP configuration, repository instructions, search routing, large-log policy, automatic handoff discovery hooks, handoff lifecycle, and SGLang/Ascend skills.
 
 After changing `~/.codex/config.toml` or `~/.codex/.env`, restart the Codex extension/VS Code window and start a new session. OpenAI documents this restart/new-session requirement for Codex IDE configuration changes.
 
@@ -188,10 +189,14 @@ exact identifier/path/error -> rg/direct navigation
 unknown concept             -> Semble
 large log                   -> reducer MUST run first
 report-only review          -> handoff MUST be written when required
-implementation session      -> consume handoff; do not redo broad review
+implementation session      -> hooks auto-discover handoff -> consume it; do not redo broad review
 Ascend task                 -> route to relevant NPU skills
 ```
 
-These are instruction-enforced through repository instructions/skills, not hard shell interception.
+Handoff **discovery** is hook-driven: `SessionStart` and `UserPromptSubmit` resolve and inject the matching open handoff path. Handoff creation/consumption, log reduction, and search routing remain instruction-enforced through repository rules/skills.
 
 CLI-specific aliases are not automatic in the extension. Hook behavior can depend on the Codex client/version, so do not rely on the standalone `git push` hook as the only protection in the IDE; the workflow rule still says to run decided Git operations directly in the terminal.
+
+## 8. One active session per worktree
+
+Do not run two Codex editing/review sessions against the same SGLang worktree. If you need parallel work, create another Git worktree and open it in a separate WSL VS Code window. This prevents races in Git state, local diffs and handoff state.

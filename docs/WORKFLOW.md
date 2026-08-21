@@ -1,136 +1,191 @@
 # Workflow
 
-## Recommended interface
+## Core model
 
-Use **VS Code + WSL + Codex extension** as the default daily workflow. Open SGLang with `cd ~/code/sglang && code .`, then work from the Codex sidebar. Use the CLI (`cx`, `cxh`, etc.) only when a terminal session is intentionally preferable. See [VS Code + Codex](VSCODE.md).
+**Chat = working memory. Git = code state. `.codex-artifacts/` = durable local workflow state.**
 
-## Core rule
+The workflow is optimized to keep each Codex session narrow while preserving actionable state between sessions.
 
-**Chat = working memory. Git = code state. Handoff/Goal files = durable memory.**
+## 1. Decide whether to continue the session
 
-A new engineering objective normally gets a new Codex session. Long, evidence-driven experiments are the exception.
-
-For what is automatic versus manual, see [Automation and enforcement](AUTOMATION.md).
-
-## 1. Session boundaries
-
-Use a new session for each atomic objective:
-
-- PR review;
-- resolve merge/rebase conflicts;
-- address review comments;
-- update PR description;
-- fix one CI failure;
-- investigate one bounded regression;
-- perform one scoped refactor.
-
-Do not treat one PR as one permanent conversation.
-
-Example:
+Use this rule before sending the next prompt:
 
 ```text
-PR #31320
-  review             -> Sol/high   -> handoff if needed -> stop
-  address findings   -> Terra      -> consume handoff   -> stop
-  resolve conflicts  -> Terra      -> stop
-  update description -> Luna       -> stop
+same goal + same strategy -> continue
+same goal + new strategy  -> new session
+new goal                  -> new session
 ```
 
-### Same objective
+Examples of **new strategy**:
 
-- `/side` - a short detour that does not change the objective.
-- `/compact` - reduce transcript size while continuing the same objective.
-- `/fork` - explore an alternative from the same state; **not** a review-to-implementation handoff.
+- “Instead of changing every file, centralize the fix in the package initializer.”
+- “Remove the guards we just added and restore the upstream condition.”
+- “The root cause is not the backend selector; now investigate graph capture.”
 
-## 2. Review -> implementation handoff
+These are expensive if appended to an already large implementation thread because the new turn still carries the abandoned approach.
 
-### What is automatic
-
-For report-only PR review, the local SGLang review skill now has a **MUST-create** handoff rule when all of the following are true:
-
-1. Codex found actionable findings;
-2. implementation is not being performed in the same review session;
-3. those findings are not already authoritative unresolved GitHub review threads.
-
-So this prompt is enough:
+### Atomic task examples
 
 ```text
-Review PR #31320. Report only.
+PR review             -> session -> handoff if actionable -> stop
+address findings      -> new session -> auto-discovered handoff -> patch -> stop
+resolve conflicts     -> new session -> stop
+update PR description -> new session -> stop
+CI regression         -> new session -> handoff if implementation deferred -> stop
 ```
 
-Expected result:
+Use `/side` only for a small detour that does not change the objective or implementation strategy. `/fork` is not a review-to-implementation handoff.
+
+## 2. Review -> implementation
+
+### Review session
+
+Prompt:
 
 ```text
-Session A: review only
-  -> actionable findings
-  -> .codex/handoffs/pr-31320-review.md   (automatic by repo rule)
-  -> stop
+Review PR #34855. Report only.
+```
 
-Session B: implementation
-  -> GitHub unresolved threads if authoritative
-     OR .codex/handoffs/pr-31320-review.md
+If actionable findings exist and GitHub unresolved review threads are not already the authoritative source, Codex creates:
+
+```text
+.codex-artifacts/handoffs/pr-34855-review.md
+```
+
+The handoff contains metadata plus compact implementation findings only.
+
+### New implementation session
+
+Prompt:
+
+```text
+Address the review findings.
+```
+
+You normally do **not** provide the handoff path.
+
+Auto-discovery happens twice:
+
+1. `SessionStart` hook resolves an open handoff for the current PR/branch/worktree and injects the path.
+2. `UserPromptSubmit` repeats the check for implementation-like prompts.
+
+The implementation agent then must:
+
+```text
+read selected handoff
   -> re-verify current HEAD
-  -> implement only listed actionable findings
+  -> skip stale/already-fixed findings
+  -> implement only actionable items
   -> targeted validation
+  -> re-check diff
+  -> mark handoff consumed if complete
   -> stop
 ```
 
-The second session must not redo the broad PR review just to reconstruct context.
-
-### Handoff contents
-
-Keep only durable implementation information:
-
-- source/PR and reviewed commit when known;
-- severity/priority;
-- file and symbol;
-- root cause/problem;
-- exact intended change;
-- constraints/non-goals;
-- minimal validation;
-- material uncertainty only when it changes implementation.
-
-Do **not** copy review narration, exploratory dead ends, long diffs, or chat history.
-
-### Create one manually
-
-Numeric PR:
+Manual diagnostic:
 
 ```bash
-.codex/scripts/new-handoff.sh 31320
-# .codex/handoffs/pr-31320-review.md
+python3 .codex/scripts/resolve-handoff.py --json
 ```
 
-Generic bounded investigation:
+## 3. Handoff metadata and status
+
+New handoffs include:
+
+```text
+status
+kind
+PR
+branch
+repository
+worktree
+base commit
+reviewed HEAD
+creation time
+consumed time / HEAD
+```
+
+This makes discovery deterministic enough to avoid selecting a handoff merely because its filename looks similar.
+
+Discovery priority:
+
+```text
+current PR
+  -> exact current branch
+  -> newest OPEN handoff for the same worktree
+  -> only OPEN handoff for the same repository
+```
+
+Consumed handoffs are ignored.
+
+Manual lifecycle commands:
 
 ```bash
+.codex/scripts/new-handoff.sh 34855
 .codex/scripts/new-handoff.sh scheduler-rank-desync
-# .codex/handoffs/scheduler-rank-desync.md
+python3 .codex/scripts/handoff-status.py consume <path>
+python3 .codex/scripts/handoff-status.py reopen <path>
 ```
 
-If there are no actionable findings, do not create an empty handoff.
+## 4. Runtime artifacts are separate from static workflow files
 
-If the authoritative findings already exist as unresolved GitHub review comments, use those in the new session rather than maintaining a duplicate local copy.
+```text
+.codex/
+  scripts/
+  templates/
 
-## 3. Long performance/kernel work -> Goal + artifacts
+.codex-artifacts/
+  handoffs/
+  goals/
+  logs/
+```
 
-For multi-round performance optimization, kernel work, or an unknown regression that genuinely needs iterative evidence:
+Why: `.codex/` may be protected/read-only in the VS Code Codex sandbox. Mutable state must have a writable destination.
+
+Both directories are local workflow state and are excluded from upstream SGLang PRs through `.git/info/exclude`.
+
+## 5. Large logs
+
+If a local/downloaded log is at least 1 MiB or 10,000 lines:
+
+```text
+MUST check size first
+MUST NOT full-read raw log first
+MUST run reducer
+MUST inspect focused artifact first
+```
+
+Command:
+
+```bash
+.codex/scripts/extract-log-context.py /path/to/log
+```
+
+Output:
+
+```text
+.codex-artifacts/logs/<name>.focused.txt
+```
+
+## 6. Long performance/kernel work
+
+For genuinely iterative evidence-driven work:
 
 ```text
 /plan
 /goal <objective>
 ```
 
-Create the durable ledger:
+Then:
 
 ```bash
 .codex/scripts/new-goal.sh <goal-slug>
 ```
 
-Structure:
+State lives in:
 
 ```text
-.codex/goals/<goal>/
+.codex-artifacts/goals/<goal>/
 ├── goal.md
 ├── environment.md
 ├── baseline.md
@@ -140,90 +195,51 @@ Structure:
 └── artifacts/
 ```
 
-One experiment round should contain one hypothesis, one scoped change, correctness evidence, the same benchmark, and an artifact update.
+One round = one hypothesis + one scoped change + correctness + same benchmark + artifact update.
 
-## 4. Model routing
+## 7. One active session per worktree
+
+Parallel Codex sessions must not share an editing worktree.
+
+Use Git worktrees for parallel tasks:
+
+```bash
+git worktree add ../sglang-task-a <branch-a>
+git worktree add ../sglang-task-b <branch-b>
+```
+
+Then open each worktree in a separate WSL VS Code window.
+
+## 8. Model routing
 
 ```text
 Luna / low
-  PR descriptions, metadata, docs, mechanical edits.
+  metadata, PR description, mechanical docs/simple edits
 
 Terra / medium
-  default development: conflicts, review-comment fixes, ordinary bugs/refactors.
+  default implementation, conflicts, review fixes, ordinary bugs/refactors
 
 Sol / high
-  deep PR review, difficult feature work, hard Ascend correctness,
-  HCCL/NPUGraph/distributed/performance root-cause work.
+  deep review, hard NPU correctness, NPUGraph/HCCL/distributed, difficult performance
 
 Sol / xhigh
-  escalation only after a focused high-effort investigation fails.
+  escalation only after a focused high-effort attempt failed
 ```
 
-For the VS Code extension, Terra/medium comes from the main `~/.codex/config.toml`; switch to Sol/high in the extension UI for genuinely hard tasks.
+## 9. Search routing
 
-CLI-only aliases:
-
-```bash
-cxl
-cx
-cxh
-cxx
+```text
+exact identifier/path/error -> rg
+known PR/commit             -> git show / git diff
+model-family history        -> model history skill
+unknown conceptual location -> Semble
+known symbol relationships  -> Serena (optional)
 ```
 
-The CLI helper router also supports task kinds:
+Stop semantic discovery once the concrete symbol/path is known.
 
-```bash
-cx-task review
-cx-task conflict
-cx-task npu
-cx-task docs
-```
+## 10. Tests and Git
 
-## 5. Do not spend a model turn on decided shell operations
+Do not create/modify tests by default. Add them only when explicitly requested, required by review/CI, or needed as a real regression guard.
 
-When no reasoning is needed, run directly in the terminal:
-
-```bash
-git push
-git status
-git switch <branch>
-git fetch --prune
-```
-
-The included `UserPromptSubmit` hook blocks standalone prompts such as `push` or `git push` before a model call.
-
-A request such as `resolve conflicts, validate the diff, then push` is different: push is part of a reasoning task and is not blocked.
-
-## 6. Scope discipline
-
-- Make the smallest change that solves the current objective.
-- Do not add unrelated cleanup/refactoring/docs while already in a file.
-- PR review is report-only unless editing is explicitly requested.
-- Conflict resolution is conflict resolution only.
-- Stop when the objective and minimal validation are complete.
-
-## 7. Tests
-
-Do not create or modify tests by default.
-
-Tests are appropriate when:
-
-1. explicitly requested;
-2. explicitly required by review/CI;
-3. a real regression guard is necessary to demonstrate the fix.
-
-For SGLang, consult upstream `.claude/rules/unit-test-admission.md` before adding or modifying tests.
-
-## 8. Weekly workflow check
-
-Use `/usage` periodically and watch for:
-
-- number of turns per objective;
-- repeated reads/searches of the same context;
-- unnecessary xhigh use;
-- trivial Git prompts;
-- performance experiments without an artifact ledger;
-- large logs read without reduction;
-- implementation sessions that redo an existing review instead of consuming a handoff.
-
-Optimize the workflow only after observing an actual bottleneck; do not add many MCP/RAG tools at once.
+Do not spend a model turn on decided Git operations such as `git push`; run them directly in the terminal.

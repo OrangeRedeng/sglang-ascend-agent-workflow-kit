@@ -236,3 +236,19 @@ cx
 ```
 
 Inside Codex, verify MCP status with `/mcp`.
+
+## 12. Updating an existing installation
+
+If this kit is already installed and you downloaded a newer archive, do not rerun the complete Windows/WSL bootstrap just to update workflow rules.
+
+From the new kit directory in WSL:
+
+```bash
+./wsl/06-update-existing-workspace.sh
+```
+
+This updates hooks, repo-local rules/skills/scripts, migrates legacy mutable `.codex/{handoffs,goals,logs}` state into `.codex-artifacts/`, and preserves your SGLang Git branch/worktree.
+
+Afterward reload the VS Code WSL window and start a **new Codex session** so `SessionStart` handoff discovery is active.
+
+See [Updating](UPDATING.md).

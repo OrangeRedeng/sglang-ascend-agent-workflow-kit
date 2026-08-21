@@ -9,7 +9,7 @@ The kit is built around one principle: **keep long-lived engineering state in Gi
 - Windows 11 + WSL2 Ubuntu with VPN-friendly mirrored networking.
 - Codex VS Code extension as the recommended daily UI, backed by the same WSL Codex configuration, repo instructions, skills, and MCP servers.
 - Codex CLI profiles for terminal-first, remote, and diagnostic work.
-- A CLI prompt guard that blocks wasteful standalone `git push` prompts; extension-side hook behavior is treated as client/version dependent.
+- Codex `SessionStart`/`UserPromptSubmit` hooks that auto-discover matching open handoffs and inject their path into the new implementation session, plus a guard that blocks wasteful standalone `git push` prompts.
 - Semble MCP for conceptual code search, with a longer startup timeout and first-run prewarm.
 - Optional Serena MCP for symbol-aware callers/references/refactoring.
 - SGLang-local session, handoff, Goal, CI, log-analysis, and Ascend skills.
@@ -24,10 +24,10 @@ The largest savings usually come from session lifecycle and retrieval discipline
 | Mechanism | What it changes | Expected token impact | Usability impact |
 |---|---|---:|---|
 | **New objective -> new session** | Stops unrelated history from following the next task | **Very high** for long sessions | Cleaner scope; fewer accidental side quests |
-| **Handoff artifacts** | Automatically record local actionable review/investigation findings for the next session; implementation consumes the compact artifact instead of re-reviewing | **High** when one task feeds another | Review and implementation stay independent but connected |
+| **Handoff artifacts + resolver** | Record local actionable findings; hooks resolve the matching open handoff from PR/branch/worktree metadata and inject its path into the next implementation session instead of re-reviewing | **High** when one task feeds another | Review and implementation stay independent but connected |
 | **Goal + experiment ledger** | Keeps benchmark state, hypotheses, failures, and next steps in files instead of chat history | **High** for multi-round performance work | Long optimization loops become reproducible and resumable |
 | **Model routing** | Uses Luna/Terra for routine work and Sol only where deeper reasoning is justified | **Direct cost reduction** | Less manual model switching; expensive reasoning is reserved for hard work |
-| **CLI prompt guard** | Blocks standalone `git push`-style prompts before they become model turns in the CLI reference path | **High per avoided trivial turn in a long session** | Simple Git actions stay in the terminal where they belong; IDE users still follow the same terminal-first rule |
+| **Session/prompt hooks** | Auto-discover matching open handoffs at session start and implementation prompts; also block standalone `git push`-style turns | **High** when review feeds implementation; avoids repeated discovery | Handoffs become mostly path-free for the user |
 | **Targeted `rg` / Git first** | Uses exact search when an identifier, error, path, PR, or commit is already known | **Medium to high** | Faster navigation; less tool wandering |
 | **Semble** | Returns small semantic code chunks for conceptual questions instead of grep + full-file reads | **Potentially high retrieval savings** | Natural-language code discovery when the symbol/path is unknown |
 | **Serena (optional)** | Uses LSP-backed symbol relationships for callers, references, implementations, and refactors | **Medium**, especially in large cross-file tasks | IDE-like navigation and safer structural edits |
@@ -50,7 +50,7 @@ total agent cost
 For repository work, **repeated input/context is often the dominant term**. That is why this kit prioritizes:
 
 1. **shorter task lifetimes**, not merely shorter prompts;
-2. **small handoff files**, not `/fork`-style duplication of a long transcript;
+2. **small auto-discovered handoff files**, not `/fork`-style duplication of a long transcript;
 3. **targeted retrieval**, not repeatedly reading large files and logs;
 4. **lower-cost models for mechanical work**, with deliberate escalation for correctness/performance problems.
 
@@ -62,8 +62,8 @@ Serena has a different benefit. It is not primarily a semantic-search replacemen
 
 The kit distinguishes three enforcement levels:
 
-- **Hard-enforced:** code/hooks perform or block the behavior without relying on model judgment (for example, standalone `git push` prompts are blocked before a model call).
-- **Instruction-enforced:** `AGENTS.override.md` and task skills use **MUST** rules. Large-log reduction and handoff creation/consumption are in this category; normally you do **not** repeat them in the prompt.
+- **Hard/hook-driven:** code runs before the model session/turn. Handoff **discovery** is automatic through `SessionStart`/`UserPromptSubmit` hooks, and standalone `git push` prompts are blocked before a model call.
+- **Instruction-enforced:** `AGENTS.override.md` and task skills use **MUST** rules. Large-log reduction, handoff creation/consumption, strategy-reversal session splitting, and one-session-per-worktree discipline are in this category.
 - **Manual/optional:** capabilities such as Serena or optional AscendC/Triton skill bundles are enabled only when you choose to install/use them.
 
 Examples:
@@ -78,7 +78,7 @@ For a large local/downloaded log, Codex should check its size, run `.codex/scrip
 Review PR #31320. Report only.
 ```
 
-If actionable local findings exist and unresolved GitHub review threads are not already the authoritative record, the review skill should write `.codex/handoffs/pr-31320-review.md` before the session ends. A new implementation session consumes that handoff instead of repeating the broad review.
+If actionable local findings exist and unresolved GitHub review threads are not already authoritative, the review skill writes `.codex-artifacts/handoffs/pr-31320-review.md`. In the next session the hooks resolve the current PR/branch/worktree, inject the matching handoff path, and the implementation agent consumes it instead of repeating the broad review.
 
 See [Automation and enforcement](docs/AUTOMATION.md) for the exact contracts and thresholds.
 
@@ -90,7 +90,9 @@ The workflow also improves development quality even when token savings are small
 - **Better reproducibility:** performance experiments retain workload, versions, baseline, rejected directions, and artifacts.
 - **Safer Ascend work:** benchmark and profiling skills enforce environment, backend, graph, precision, and distributed-mode gates before conclusions are accepted.
 - **Faster onboarding:** `AGENTS.override.md` and skills encode the search order and repository conventions once, so they do not have to be repeated in every prompt.
-- **Better recovery:** a fresh Codex session can resume from Git + a compact handoff/Goal artifact without replaying the full investigation transcript.
+- **Better recovery:** a fresh Codex session can resume from Git + an auto-discovered compact handoff/Goal artifact without replaying the full investigation transcript.
+- **Safer parallel work:** the workflow explicitly requires one active Codex session per Git worktree; real parallelism uses `git worktree` instead of shared mutable state.
+- **Cheaper reversals:** changing implementation strategy is treated as a new session boundary so abandoned approaches stop inflating later turns.
 
 ### What this kit does *not* claim
 
@@ -164,10 +166,11 @@ cxx  -> Sol / xhigh      escalation only
 - [Installation](docs/INSTALLATION.md) - Windows, WSL, VPN, Codex, Semble, workspace setup.
 - [VS Code + Codex](docs/VSCODE.md) - recommended extension-first workflow and verification.
 - [Automation](docs/AUTOMATION.md) - what happens automatically, what is instruction-enforced, and what remains manual.
-- [Workflow](docs/WORKFLOW.md) - session boundaries, handoffs, Goals, model routing, tests, Git discipline.
+- [Workflow](docs/WORKFLOW.md) - session boundaries, automatic handoffs, Goals, worktrees, model routing, tests, Git discipline.
 - [Tooling](docs/TOOLING.md) - `rg`, Git, Semble, Serena, model-history skills, prompt guard.
 - [Ascend / NPU](docs/ASCEND.md) - `torch_npu`, profiling, HCCL, Triton, AscendC, benchmark gates.
-- [Troubleshooting](docs/TROUBLESHOOTING.md) - WSL, VPN/DNS, Windows Codex shim, Semble timeout, GitHub auth.
+- [Troubleshooting](docs/TROUBLESHOOTING.md) - WSL, VPN/DNS, Windows Codex shim, Semble timeout, GitHub auth, handoff discovery.
+- [Updating](docs/UPDATING.md) - upgrade an already configured SGLang workspace without reinstalling everything.
 - [Contributing](CONTRIBUTING.md) - repository development and validation rules.
 - [Acknowledgements](ACKNOWLEDGEMENTS.md) - upstream projects and inspirations.
 

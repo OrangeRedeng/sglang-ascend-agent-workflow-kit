@@ -130,4 +130,4 @@ Do not ask several profiler skills to analyze the same artifact in parallel.
 
 ## Remote Ascend hosts
 
-Local WSL can remain the development/navigation environment while runtime validation happens on an Ascend server or CI host. Always record the remote environment in `.codex/goals/<goal>/environment.md` so local assumptions do not leak into NPU conclusions.
+Local WSL can remain the development/navigation environment while runtime validation happens on an Ascend server or CI host. Always record the remote environment in `.codex-artifacts/goals/<goal>/environment.md` so local assumptions do not leak into NPU conclusions.

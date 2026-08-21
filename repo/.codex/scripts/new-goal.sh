@@ -5,9 +5,10 @@ if [[ $# -lt 1 ]]; then
   exit 2
 fi
 ROOT="$(git rev-parse --show-toplevel)"
-SLUG="$1"
-SRC="$ROOT/.codex/goals/TEMPLATE"
-DST="$ROOT/.codex/goals/$SLUG"
+SLUG="$(printf '%s' "$1" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-' | sed -E 's/-+/-/g; s/^-//; s/-$//')"
+[[ -n "$SLUG" ]] || { echo "Invalid goal slug" >&2; exit 2; }
+SRC="$ROOT/.codex/templates/goal"
+DST="$ROOT/.codex-artifacts/goals/$SLUG"
 if [[ -e "$DST" ]]; then
   echo "Already exists: $DST" >&2
   exit 1

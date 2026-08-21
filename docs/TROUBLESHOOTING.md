@@ -202,3 +202,70 @@ Then restart the extension again.
 ## `cx` works but the VS Code sidebar looks unrelated
 
 This is expected if both are open: CLI and extension are separate clients/sessions. Do not use `cx` as a way to attach Codex to VS Code. For the recommended workflow, open `code .` from `~/code/sglang` and use a new local session in the Codex sidebar.
+
+## Handoff exists but Codex does not discover it automatically
+
+First verify the resolver directly from the SGLang worktree:
+
+```bash
+cd ~/code/sglang
+python3 .codex/scripts/resolve-handoff.py --json
+```
+
+If `selected` is populated, the local metadata match works. Reload the VS Code WSL window and start a **new Codex session** so the updated `SessionStart` hook is loaded.
+
+Check global hook installation:
+
+```bash
+cat ~/.codex/hooks.json
+ls -l ~/.codex/hooks/session_start.py ~/.codex/hooks/prompt_guard.py
+```
+
+The hook config should contain both `SessionStart` and `UserPromptSubmit`.
+
+If `selected` is empty, list open handoffs:
+
+```bash
+ls -la .codex-artifacts/handoffs/
+```
+
+Legacy handoffs under `.codex/handoffs/` should be migrated by:
+
+```bash
+./wsl/06-update-existing-workspace.sh
+```
+
+## Reducer fails because `.codex` is read-only
+
+Current versions write mutable output to:
+
+```text
+.codex-artifacts/logs/
+```
+
+not `.codex/logs/`.
+
+If an old script still tries to write under `.codex/logs/`, update the installed workflow:
+
+```bash
+./wsl/06-update-existing-workspace.sh
+```
+
+Then verify:
+
+```bash
+grep -n 'codex-artifacts' ~/code/sglang/.codex/scripts/extract-log-context.py
+```
+
+## Multiple Codex sessions changed the same worktree
+
+Do not continue both sessions. Keep one active session and inspect `git status`/`git diff` before proceeding.
+
+For future parallel work use separate Git worktrees:
+
+```bash
+git worktree add ../sglang-task-a <branch-a>
+git worktree add ../sglang-task-b <branch-b>
+```
+
+Open each worktree in its own WSL VS Code window.

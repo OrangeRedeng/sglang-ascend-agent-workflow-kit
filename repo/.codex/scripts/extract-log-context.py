@@ -3,7 +3,7 @@
 
 Keeps head/tail, matched lines with surrounding context, and a frequency summary.
 The original log is never modified. By default the focused output is written to
-.codex/logs/<name>.focused.txt so a model tool call does not dump the reduced
+.codex-artifacts/logs/<name>.focused.txt so a model tool call does not dump the reduced
 log itself into conversation context.
 """
 from __future__ import annotations
@@ -42,7 +42,7 @@ def safe_name(path: Path) -> str:
 def default_output(log: Path) -> Path:
     root = git_root()
     if root is not None:
-        return root / ".codex" / "logs" / f"{safe_name(log)}.focused.txt"
+        return root / ".codex-artifacts" / "logs" / f"{safe_name(log)}.focused.txt"
     return log.with_name(f"{log.name}.focused.txt")
 
 

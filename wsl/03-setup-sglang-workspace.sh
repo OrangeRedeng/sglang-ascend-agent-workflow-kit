@@ -38,7 +38,13 @@ clone_if_missing https://github.com/ascend-ai-coding/awesome-ascend-skills.git "
 clone_if_missing https://github.com/Ascend/agent-skills.git "$ASCEND_OFFICIAL"
 
 log "Repo-local Codex layer"
-mkdir -p "$SGLANG/.agents/skills" "$SGLANG/.codex"
+mkdir -p "$SGLANG/.agents/skills" "$SGLANG/.codex/scripts" "$SGLANG/.codex-artifacts/handoffs" "$SGLANG/.codex-artifacts/goals" "$SGLANG/.codex-artifacts/logs"
+# Migrate legacy mutable .codex state before replacing the static workflow layer.
+if [[ -d "$SGLANG/.codex/handoffs" || -d "$SGLANG/.codex/goals" || -d "$SGLANG/.codex/logs" ]]; then
+  cp "$KIT_ROOT/repo/.codex/scripts/migrate-artifacts.py" "$SGLANG/.codex/scripts/migrate-artifacts.py"
+  chmod +x "$SGLANG/.codex/scripts/migrate-artifacts.py"
+  python3 "$SGLANG/.codex/scripts/migrate-artifacts.py" --root "$SGLANG" --remove-legacy
+fi
 cp "$KIT_ROOT/repo/AGENTS.override.md" "$SGLANG/AGENTS.override.md"
 cp "$KIT_ROOT/repo/.sembleignore" "$SGLANG/.sembleignore"
 cp -a "$KIT_ROOT/repo/.codex/." "$SGLANG/.codex/"
@@ -46,9 +52,11 @@ cp -a "$KIT_ROOT/repo/.agents/skills/." "$SGLANG/.agents/skills/"
 chmod +x "$SGLANG/.codex/scripts/"*.sh "$SGLANG/.codex/scripts/"*.py
 
 log "Keep local workflow files out of upstream PRs"
-touch "$SGLANG/.git/info/exclude"
-for entry in ".agents/" ".codex/" "AGENTS.override.md" ".sembleignore"; do
-  grep -Fxq "$entry" "$SGLANG/.git/info/exclude" || echo "$entry" >> "$SGLANG/.git/info/exclude"
+EXCLUDE="$(git -C "$SGLANG" rev-parse --git-path info/exclude)"
+mkdir -p "$(dirname "$EXCLUDE")"
+touch "$EXCLUDE"
+for entry in ".agents/" ".codex/" ".codex-artifacts/" "AGENTS.override.md" ".sembleignore"; do
+  grep -Fxq "$entry" "$EXCLUDE" || echo "$entry" >> "$EXCLUDE"
 done
 
 log "Selected upstream SGLang skills"
