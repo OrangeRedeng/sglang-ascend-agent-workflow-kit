@@ -246,18 +246,6 @@ The printable one-page daily reference is [PRINT_RULES.pdf](PRINT_RULES.pdf).
 └── .github/workflows/     # repository validation
 ```
 
-## Publishing as a Git repository
-
-The archive intentionally does **not** contain a `.git/` directory. After extracting it:
-
-```bash
-git init
-git add .
-git commit -m "Initial workflow kit"
-```
-
-Then add your remote and push normally.
-
 ## Scope and safety
 
 This project configures development tooling. It does **not** install CANN, Ascend drivers/firmware, or a target `torch_npu` runtime. NPU runtime versions must match the actual SGLang branch, CI image, container, or Ascend host being tested.
