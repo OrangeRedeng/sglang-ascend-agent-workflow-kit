@@ -88,7 +88,7 @@ python3 .codex/scripts/handoff-status.py consume \
 
 The address-review rule requires Codex to do this automatically when completion is clear.
 
-Consumed handoffs are ignored by normal resolver discovery.
+Consumed handoffs are ignored by normal resolver discovery. New handoffs created by `new-handoff.sh` also become the **active continuation target** for their PR/worktree. Generic continuation prompts use that pointer; consuming the handoff clears it, so an older unrelated open handoff is not silently promoted as the next task.
 
 If implementation is only partial, keep `status: open`.
 

@@ -21,7 +21,9 @@ User-facing docs are intentionally limited to:
 - `docs/ASCEND.md`;
 - `docs/TROUBLESHOOTING.md`;
 - `PRINT_RULES.pdf` - one-page printable reference.
-- `docs/AUTOMATION.md` - automation/enforcement contracts for logs, handoffs, and routing.
+- `docs/AUTOMATION.md` - automation/enforcement contracts for logs, handoffs, and routing;
+- `docs/UPDATING.md` - update an existing installation;
+- `docs/VERSIONING.md` - release and installed-version policy.
 
 Do not create another README-like file unless its topic does not fit an existing document.
 
@@ -42,3 +44,17 @@ If `PRINT_RULES.pdf` changes, update `docs/source/PRINT_RULES.md`, rebuild it wi
 ## Third-party updates
 
 When changing selected skill names or repositories, verify that the referenced `SKILL.md` paths still exist upstream. Do not assume a historical skill path is still current.
+
+## Versioning and releases
+
+`VERSION` is the release source of truth and uses Semantic Versioning. Every release must also have a matching `CHANGELOG.md` heading and README current-release line.
+
+Before creating a release tag/archive:
+
+```bash
+python3 scripts/kit-version.py verify
+python3 scripts/validate_repo.py
+./scripts/package-release.sh
+```
+
+Tag names use `vX.Y.Z` and must match `VERSION`; CI checks this on tag pushes. Installed copies are tracked separately by the global `~/.codex/workflow-kit-version` marker and the workspace `.codex/KIT_VERSION` marker.

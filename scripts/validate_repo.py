@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import re
 import sys
 import tomllib
 
@@ -18,6 +20,11 @@ def require(path: str) -> None:
 
 for path in [
     "README.md",
+    "VERSION",
+    "CHANGELOG.md",
+    "docs/VERSIONING.md",
+    "scripts/kit-version.py",
+    "scripts/package-release.sh",
     "PRINT_RULES.pdf",
     "LICENSE",
     "ACKNOWLEDGEMENTS.md",
@@ -69,6 +76,27 @@ if main_config.exists():
         errors.append("Semble startup timeout must be 120 seconds in codex/config/config.toml")
 
 
+# Version contract: root VERSION is SemVer, CHANGELOG contains it, and a pushed vX.Y.Z tag matches it.
+version = ""
+try:
+    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", version):
+        errors.append(f"VERSION is not SemVer: {version!r}")
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    if not re.search(rf"^## \[{re.escape(version)}\]", changelog, re.M):
+        errors.append(f"CHANGELOG.md has no release heading for VERSION {version}")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    if f"**Current release:** `v{version}`" not in readme:
+        errors.append(f"README current release does not match VERSION v{version}")
+except Exception as exc:
+    errors.append(f"version metadata error: {exc}")
+
+if os.environ.get("GITHUB_REF_TYPE") == "tag":
+    tag = os.environ.get("GITHUB_REF_NAME", "")
+    if tag.startswith("v") and version and tag != f"v{version}":
+        errors.append(f"Git tag {tag} does not match VERSION v{version}")
+
+
 contracts = {
     "repo/AGENTS.override.md": [
         "1 MiB",
@@ -79,10 +107,11 @@ contracts = {
         "resolve-handoff.py --json",
         "**MUST** write a compact handoff",
         ".codex-artifacts/handoffs/",
+        "active handoff pointer",
     ],
     "repo/.agents/skills/sglang-pr-review/SKILL.md": [
         "new-handoff.sh <N>",
-        ".codex-artifacts/handoffs/pr-<N>-review.md",
+        ".codex-artifacts/handoffs/",
     ],
     "docs/VSCODE.md": [
         "recommended daily interface",
@@ -98,8 +127,24 @@ contracts = {
     "README.md": [
         "Recommended daily workflow: VS Code extension",
         "Do not run `cx` just to",
+        "Measured token reduction on SGLang sessions",
+        "## Version tracking",
+        "~/.codex/workflow-kit-version",
     ],
 
+    "repo/.codex/scripts/new-handoff.sh": [
+        ".active-pr-",
+        "codex-sglang-active-handoff/v1",
+    ],
+    "repo/.codex/scripts/resolve-handoff.py": [
+        "active-pointer",
+        "no-active-pointer",
+        "STALE_HOURS = 48",
+    ],
+    "repo/.codex/scripts/handoff-status.py": [
+        ".active-pr-",
+        "clear_pointer_if_matching",
+    ],
     "codex/hooks.json": [
         "SessionStart",
         "UserPromptSubmit",
@@ -110,16 +155,37 @@ contracts = {
         "06-update-existing-workspace.sh",
         ".codex-artifacts/handoffs/",
         "start a **new local Codex session**",
+        "ALLOW_DOWNGRADE=1",
+        "kit-version-history.tsv",
+    ],
+    "docs/VERSIONING.md": [
+        "Semantic Versioning",
+        "workflow-kit-version",
+        ".codex/KIT_VERSION",
+        "kit-version-history.tsv",
     ],
     "windows/01-bootstrap-windows.ps1": [
         "Ensure-VSCodeExtension",
         "OpenAI.chatgpt",
         "ms-vscode-remote.remote-wsl",
     ],
+    "wsl/02-bootstrap-wsl.sh": [
+        "workflow-kit-version",
+        "KIT_VERSION",
+    ],
     "wsl/03-setup-sglang-workspace.sh": [
         "VS Code Codex extension",
         "start a new local session",
         "CLI is optional and independent",
+        ".codex/KIT_VERSION",
+        'EXCLUDE="$SGLANG/$EXCLUDE"',
+    ],
+    "wsl/06-update-existing-workspace.sh": [
+        "ALLOW_DOWNGRADE",
+        "workflow-kit-version",
+        ".codex/KIT_VERSION",
+        "kit-version-history.tsv",
+        'EXCLUDE="$SGLANG/$EXCLUDE"',
     ],
 }
 for rel, needles in contracts.items():

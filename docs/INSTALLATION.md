@@ -252,3 +252,16 @@ This updates hooks, repo-local rules/skills/scripts, migrates legacy mutable `.c
 Afterward reload the VS Code WSL window and start a **new Codex session** so `SessionStart` handoff discovery is active.
 
 See [Updating](UPDATING.md).
+
+## Verify installed kit version
+
+After the global bootstrap and workspace setup, the two version markers should match:
+
+```bash
+cat ~/.codex/workflow-kit-version
+cat ~/code/sglang/.codex/KIT_VERSION
+cd ~/code/sglang
+python3 .codex/scripts/workflow-doctor.py
+```
+
+See [Version tracking](VERSIONING.md) for update history and release policy.

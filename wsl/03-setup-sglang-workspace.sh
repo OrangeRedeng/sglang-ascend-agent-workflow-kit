@@ -8,6 +8,7 @@ KERNEL="$CODE_ROOT/sgl-kernel-npu"
 BBUF="$CODE_ROOT/AI-Infra-Auto-Driven-SKILLS"
 ASCEND_AWESOME="$CODE_ROOT/awesome-ascend-skills"
 ASCEND_OFFICIAL="$CODE_ROOT/ascend-agent-skills"
+KIT_VERSION="$(tr -d '[:space:]' < "$KIT_ROOT/VERSION")"
 
 log() { printf '\n==> %s\n' "$*"; }
 clone_if_missing() {
@@ -27,6 +28,16 @@ link_skill() {
     echo "missing (skipped): $src"
   fi
 }
+
+if [[ -f "$SGLANG/.codex/KIT_VERSION" ]]; then
+  INSTALLED_WORKSPACE_VERSION="$(tr -d '[:space:]' < "$SGLANG/.codex/KIT_VERSION")"
+  cmp="$(python3 "$KIT_ROOT/scripts/kit-version.py" compare "$INSTALLED_WORKSPACE_VERSION" "$KIT_VERSION")" || exit 2
+  if [[ "$cmp" == "1" && "${ALLOW_DOWNGRADE:-0}" != "1" ]]; then
+    echo "ERROR: installed workspace workflow $INSTALLED_WORKSPACE_VERSION is newer than incoming $KIT_VERSION." >&2
+    echo "Use ALLOW_DOWNGRADE=1 only for an intentional downgrade." >&2
+    exit 2
+  fi
+fi
 
 mkdir -p "$CODE_ROOT"
 
@@ -53,11 +64,45 @@ chmod +x "$SGLANG/.codex/scripts/"*.sh "$SGLANG/.codex/scripts/"*.py
 
 log "Keep local workflow files out of upstream PRs"
 EXCLUDE="$(git -C "$SGLANG" rev-parse --git-path info/exclude)"
+# `git rev-parse --git-path` may return a path relative to the worktree.
+# Resolve it against SGLANG rather than the kit's current working directory.
+if [[ "$EXCLUDE" != /* ]]; then
+  EXCLUDE="$SGLANG/$EXCLUDE"
+fi
 mkdir -p "$(dirname "$EXCLUDE")"
 touch "$EXCLUDE"
 for entry in ".agents/" ".codex/" ".codex-artifacts/" "AGENTS.override.md" ".sembleignore"; do
   grep -Fxq "$entry" "$EXCLUDE" || echo "$entry" >> "$EXCLUDE"
 done
+
+# Fail fast if runtime state could leak into an upstream PR.
+if ! (cd "$SGLANG" && git check-ignore -q .codex-artifacts/); then
+  echo "ERROR: .codex-artifacts/ is not ignored by Git after setup." >&2
+  echo "Expected exclude file: $EXCLUDE" >&2
+  exit 1
+fi
+echo "Verified: .codex-artifacts/ is Git-ignored."
+
+log "Workflow-kit version"
+PREVIOUS_WORKSPACE_VERSION="$(cat "$SGLANG/.codex/KIT_VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
+printf '%s\n' "$KIT_VERSION" > "$SGLANG/.codex/KIT_VERSION"
+GLOBAL_VERSION="$(cat "$HOME/.codex/workflow-kit-version" 2>/dev/null | tr -d '[:space:]' || true)"
+mkdir -p "$SGLANG/.codex-artifacts"
+VERSION_HISTORY="$SGLANG/.codex-artifacts/kit-version-history.tsv"
+if [[ ! -s "$VERSION_HISTORY" ]]; then
+  printf 'timestamp_utc\taction\tprevious_version\tnew_version\n' > "$VERSION_HISTORY"
+fi
+printf '%s\t%s\t%s\t%s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  "install" \
+  "${PREVIOUS_WORKSPACE_VERSION:-unversioned}" \
+  "$KIT_VERSION" \
+  >> "$VERSION_HISTORY"
+echo "Installed workspace workflow-kit version: $KIT_VERSION"
+if [[ -n "$GLOBAL_VERSION" && "$GLOBAL_VERSION" != "$KIT_VERSION" ]]; then
+  echo "Warning: global Codex workflow layer is $GLOBAL_VERSION but workspace layer is $KIT_VERSION." >&2
+  echo "Run ./wsl/02-bootstrap-wsl.sh or ./wsl/06-update-existing-workspace.sh from the same kit release." >&2
+fi
 
 log "Selected upstream SGLang skills"
 for skill in \
@@ -124,5 +169,6 @@ printf 'Branch: %s\n' "$(git branch --show-current)"
 printf '\nSkills:\n'
 find -L .agents/skills -maxdepth 2 -name SKILL.md -print | sort
 
-printf '\nReady. Recommended daily workflow:\n  cd %q\n  code .\n\nIn VS Code:\n  1. confirm the lower-left indicator says WSL: Ubuntu\n  2. open the Codex sidebar\n  3. start a new local session\n\nCLI is optional and independent:\n  cx\n' "$SGLANG"
+printf '\nWorkflow doctor:\n  cd %q\n  python3 .codex/scripts/workflow-doctor.py\n\nReady. Recommended daily workflow:\n  cd %q\n  code .\n\nIn VS Code:\n  1. confirm the lower-left indicator says WSL: Ubuntu\n  2. open the Codex sidebar\n  3. start a new local session\n\nCLI is optional and independent:\n  cx\n' "$SGLANG" "$SGLANG"
+printf '\nIMPORTANT: Codex does not auto-trust unmanaged lifecycle hooks. Open Codex CLI once, run /hooks, and approve/enable SessionStart + UserPromptSubmit; then reload VS Code.\n'
 printf '\nOptional kernel-specific skills:\n  %s/wsl/04-install-ascend-kernel-skills-optional.sh --help\n' "$KIT_ROOT"

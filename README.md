@@ -4,12 +4,14 @@ A reproducible Windows 11 + WSL2 workflow for using OpenAI Codex on SGLang devel
 
 The kit is built around one principle: **keep long-lived engineering state in Git and small artifacts, not in an ever-growing chat transcript**.
 
+**Current release:** `v0.1.0` — see [`CHANGELOG.md`](CHANGELOG.md).
+
 ## What this repository configures
 
 - Windows 11 + WSL2 Ubuntu with VPN-friendly mirrored networking.
 - Codex VS Code extension as the recommended daily UI, backed by the same WSL Codex configuration, repo instructions, skills, and MCP servers.
 - Codex CLI profiles for terminal-first, remote, and diagnostic work.
-- Codex `SessionStart`/`UserPromptSubmit` hooks that auto-discover matching open handoffs and inject their path into the new implementation session, plus a guard that blocks wasteful standalone `git push` prompts.
+- Codex `SessionStart`/`UserPromptSubmit` hooks that auto-discover matching open handoffs and inject their path into the new implementation session, plus a guard that blocks wasteful standalone `git push` prompts. User-installed command hooks must be explicitly trusted once in Codex before they execute.
 - Semble MCP for conceptual code search, with a longer startup timeout and first-run prewarm.
 - Optional Serena MCP for symbol-aware callers/references/refactoring.
 - SGLang-local session, handoff, Goal, CI, log-analysis, and Ascend skills.
@@ -24,16 +26,30 @@ The largest savings usually come from session lifecycle and retrieval discipline
 | Mechanism | What it changes | Expected token impact | Usability impact |
 |---|---|---:|---|
 | **New objective -> new session** | Stops unrelated history from following the next task | **Very high** for long sessions | Cleaner scope; fewer accidental side quests |
-| **Handoff artifacts + resolver** | Record local actionable findings; hooks resolve the matching open handoff from PR/branch/worktree metadata and inject its path into the next implementation session instead of re-reviewing | **High** when one task feeds another | Review and implementation stay independent but connected |
+| **Handoff artifacts + resolver** | Record local actionable findings; an active pointer connects the latest review to the next implementation, while topic + HEAD freshness prevent stale fallback | **High** when one task feeds another | Generic `Address #PR review` prompts no longer need a path and do not guess among old handoffs |
 | **Goal + experiment ledger** | Keeps benchmark state, hypotheses, failures, and next steps in files instead of chat history | **High** for multi-round performance work | Long optimization loops become reproducible and resumable |
 | **Model routing** | Uses Luna/Terra for routine work and Sol only where deeper reasoning is justified | **Direct cost reduction** | Less manual model switching; expensive reasoning is reserved for hard work |
-| **Session/prompt hooks** | Auto-discover matching open handoffs at session start and implementation prompts; also block standalone `git push`-style turns | **High** when review feeds implementation; avoids repeated discovery | Handoffs become mostly path-free for the user |
+| **Session/prompt hooks** | Auto-discover matching open handoffs at session start and implementation prompts; also block standalone `git push`-style turns | **High** when review feeds implementation; avoids repeated discovery | Handoffs become mostly path-free after one-time hook trust approval |
 | **Targeted `rg` / Git first** | Uses exact search when an identifier, error, path, PR, or commit is already known | **Medium to high** | Faster navigation; less tool wandering |
 | **Semble** | Returns small semantic code chunks for conceptual questions instead of grep + full-file reads | **Potentially high retrieval savings** | Natural-language code discovery when the symbol/path is unknown |
 | **Serena (optional)** | Uses LSP-backed symbol relationships for callers, references, implementations, and refactors | **Medium**, especially in large cross-file tasks | IDE-like navigation and safer structural edits |
 | **Log reduction** | For local/downloaded logs >= 1 MiB or >= 10k lines, repo rules require focused reduction before any full raw-log read | **High for large logs** | Faster triage; less irrelevant output to inspect |
 | **Task-specific skills** | Reuses bounded workflows for PR review, regressions, Ascend profiling, HCCL, `torch_npu`, etc. | **Indirect but often significant** | Fewer repeated instructions and fewer wrong investigation branches |
 | **Stop rules** | Ends the session once the requested change and minimal validation are complete | **Medium to high** | Prevents cleanup/refactor/review expansion after the task is already solved |
+
+### Measured token reduction on SGLang sessions
+
+The workflow has also been tested against real SGLang/Codex session logs. These numbers measure **processed input tokens**, not billing units and not a guaranteed subscription-quota reduction. Task mix differs between days, so treat the comparison as an observed engineering signal rather than a controlled benchmark.
+
+| Session corpus | Sessions | Mean input / session | Median input / session | Mean reduction vs old workflow | Mean input saved / session |
+|---|---:|---:|---:|---:|---:|
+| **Old workflow baseline** | 44 | ~24.10M | ~7.70M | - | - |
+| **First day with workflow (20 Aug 2026)** | 14 | ~2.71M | ~1.44M | **~88.8%** | **~21.39M** |
+| **Latest workflow (21-22 Aug 2026)** | 25 | **~1.98M** | **~1.16M** | **~91.8%** | **~22.12M** |
+
+A normalized way to read the latest result: **25 sessions at the historical mean would process about 602.5M input tokens; the observed 25-session corpus processed about 49.4M**. That is roughly **553M fewer processed input tokens (~91.8%)** at the per-session mean. This is not a claim that the kit causally saves exactly 553M tokens for every 25 tasks; the old corpus contained several pathological long sessions and the workloads are not identical.
+
+The latest revision also improved over the first workflow day: mean input fell from ~2.71M to ~1.98M per session (**~26.9% lower**), while user turns/session and tool calls/session also decreased. The largest remaining token hotspot was broad PR review, which is why this version adds a bounded per-component review retrieval rule.
 
 ### Where the token savings actually come from
 
@@ -62,7 +78,7 @@ Serena has a different benefit. It is not primarily a semantic-search replacemen
 
 The kit distinguishes three enforcement levels:
 
-- **Hard/hook-driven:** code runs before the model session/turn. Handoff **discovery** is automatic through `SessionStart`/`UserPromptSubmit` hooks, and standalone `git push` prompts are blocked before a model call.
+- **Hard/hook-driven after trust approval:** code runs before the model session/turn. Handoff **discovery** is automatic through `SessionStart`/`UserPromptSubmit` hooks, and standalone `git push` prompts are blocked before a model call. Codex deliberately does not execute untrusted user hooks, so approve both hooks once with `/hooks`.
 - **Instruction-enforced:** `AGENTS.override.md` and task skills use **MUST** rules. Large-log reduction, handoff creation/consumption, strategy-reversal session splitting, and one-session-per-worktree discipline are in this category.
 - **Manual/optional:** capabilities such as Serena or optional AscendC/Triton skill bundles are enabled only when you choose to install/use them.
 
@@ -78,7 +94,7 @@ For a large local/downloaded log, Codex should check its size, run `.codex/scrip
 Review PR #31320. Report only.
 ```
 
-If actionable local findings exist and unresolved GitHub review threads are not already authoritative, the review skill writes `.codex-artifacts/handoffs/pr-31320-review.md`. In the next session the hooks resolve the current PR/branch/worktree, inject the matching handoff path, and the implementation agent consumes it instead of repeating the broad review.
+If actionable local findings exist and unresolved GitHub review threads are not already authoritative, the review skill writes `.codex-artifacts/handoffs/pr-31320-review.md` (or a topic-specific file such as `pr-31320-fsdp-review.md`). In the next session the trusted hooks prefer the active handoff pointer produced by that review, then use repository/PR/branch/worktree + task topic + HEAD freshness as bounded fallback evidence. The implementation agent consumes the selected handoff instead of repeating the broad review. After consumption the active pointer is cleared, so an older unrelated open handoff is not silently promoted.
 
 See [Automation and enforcement](docs/AUTOMATION.md) for the exact contracts and thresholds.
 
@@ -143,6 +159,20 @@ Then create the SGLang workspace:
 ```bash
 ./wsl/03-setup-sglang-workspace.sh
 cd ~/code/sglang
+```
+
+Approve the two user lifecycle hooks once (Codex intentionally does not auto-trust unmanaged command hooks):
+
+```text
+cx
+/hooks
+# approve/enable SessionStart and UserPromptSubmit, then exit
+```
+
+Then verify the installation and open VS Code:
+
+```bash
+python3 .codex/scripts/workflow-doctor.py
 code .
 ```
 
@@ -161,6 +191,23 @@ cxh  -> Sol / high       deep review, hard NPU/debug/perf
 cxx  -> Sol / xhigh      escalation only
 ```
 
+## Version tracking
+
+The kit tracks the version of both installed layers:
+
+```text
+~/.codex/workflow-kit-version       global hook bundle
+~/code/sglang/.codex/KIT_VERSION    repo-local workflow layer
+```
+
+Check the effective installation from the SGLang worktree:
+
+```bash
+python3 .codex/scripts/workflow-doctor.py
+```
+
+`wsl/06-update-existing-workspace.sh` prints the installed and incoming versions before changing anything, refuses accidental downgrades, records the successful version in both markers, and appends local update history to `.codex-artifacts/kit-version-history.tsv`. Release history is kept in [`CHANGELOG.md`](CHANGELOG.md); `scripts/package-release.sh` creates a versioned ZIP + SHA-256 sidecar. Details are in [Version tracking](docs/VERSIONING.md).
+
 ## Documentation
 
 - [Installation](docs/INSTALLATION.md) - Windows, WSL, VPN, Codex, Semble, workspace setup.
@@ -171,6 +218,7 @@ cxx  -> Sol / xhigh      escalation only
 - [Ascend / NPU](docs/ASCEND.md) - `torch_npu`, profiling, HCCL, Triton, AscendC, benchmark gates.
 - [Troubleshooting](docs/TROUBLESHOOTING.md) - WSL, VPN/DNS, Windows Codex shim, Semble timeout, GitHub auth, handoff discovery.
 - [Updating](docs/UPDATING.md) - upgrade an already configured SGLang workspace without reinstalling everything.
+- [Version tracking](docs/VERSIONING.md) - SemVer, installed-version markers, downgrade protection, and release tags.
 - [Contributing](CONTRIBUTING.md) - repository development and validation rules.
 - [Acknowledgements](ACKNOWLEDGEMENTS.md) - upstream projects and inspirations.
 
@@ -181,6 +229,8 @@ The printable one-page daily reference is [PRINT_RULES.pdf](PRINT_RULES.pdf).
 ```text
 .
 ├── README.md
+├── VERSION
+├── CHANGELOG.md
 ├── PRINT_RULES.pdf
 ├── ACKNOWLEDGEMENTS.md
 ├── CONTRIBUTING.md

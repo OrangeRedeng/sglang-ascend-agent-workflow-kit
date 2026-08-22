@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <PR-number|slug>" >&2
-  echo "Examples: $0 31320 | $0 scheduler-rank-desync" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  echo "Usage: $0 <PR-number|slug> [topic]" >&2
+  echo "Examples:" >&2
+  echo "  $0 31320" >&2
+  echo "  $0 34855 fsdp-review" >&2
+  echo "  $0 scheduler-rank-desync" >&2
   exit 2
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
 KEY="$1"
+TOPIC_ARG="${2:-}"
 SRC="$ROOT/.codex/templates/handoff.md"
 DST_DIR="$ROOT/.codex-artifacts/handoffs"
 mkdir -p "$DST_DIR"
@@ -27,12 +31,15 @@ WORKTREE="$ROOT"
 if [[ "$KEY" =~ ^[0-9]+$ ]]; then
   PR="$KEY"
   KIND="pr-review"
-  SOURCE="PR #${KEY} review"
-  DST="$DST_DIR/pr-${KEY}-review.md"
+  TOPIC="$(slugify "${TOPIC_ARG:-review}")"
+  [[ -n "$TOPIC" ]] || TOPIC="review"
+  SOURCE="PR #${KEY} ${TOPIC}"
+  DST="$DST_DIR/pr-${KEY}-${TOPIC}.md"
 else
   SLUG="$(slugify "$KEY")"
   [[ -n "$SLUG" ]] || { echo "Invalid handoff slug: $KEY" >&2; exit 2; }
   KIND="investigation"
+  TOPIC="$(slugify "${TOPIC_ARG:-$SLUG}")"
   SOURCE="$SLUG"
   DST="$DST_DIR/${SLUG}.md"
   PR=""
@@ -45,13 +52,16 @@ fi
 {
   cat <<META
 ---
-schema: codex-sglang-handoff/v1
+schema: codex-sglang-handoff/v2
 status: open
 kind: $KIND
 pr: $PR
 branch: $BRANCH
 repo: $REPO
 worktree: $WORKTREE
+topic: $TOPIC
+scope:
+objective:
 base_commit: $BASE
 reviewed_head: $HEAD
 created_at: $CREATED
@@ -62,5 +72,29 @@ consumed_head:
 META
   sed "s|Source: <PR / issue / investigation>|Source: ${SOURCE}|" "$SRC"
 } > "$DST"
+
+# Record the handoff produced by the most recent review/investigation as the active
+# continuation target. This avoids guessing among older OPEN handoffs for the same PR.
+if [[ -n "$PR" ]]; then
+  POINTER="$DST_DIR/.active-pr-${PR}.json"
+else
+  POINTER="$DST_DIR/.active-worktree.json"
+fi
+python3 - "$POINTER" "$DST" "$PR" "$TOPIC" "$BRANCH" "$HEAD" "$CREATED" <<'PY_POINTER'
+import json
+from pathlib import Path
+import sys
+
+pointer, handoff, pr, topic, branch, head, created = sys.argv[1:]
+Path(pointer).write_text(json.dumps({
+    "schema": "codex-sglang-active-handoff/v1",
+    "path": str(Path(handoff).resolve()),
+    "pr": pr,
+    "topic": topic,
+    "branch": branch,
+    "reviewed_head": head,
+    "created_at": created,
+}, indent=2) + "\n", encoding="utf-8")
+PY_POINTER
 
 printf '%s\n' "$DST"

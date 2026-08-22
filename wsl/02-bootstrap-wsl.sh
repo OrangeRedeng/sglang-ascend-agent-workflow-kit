@@ -4,6 +4,7 @@ set -euo pipefail
 KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
+KIT_VERSION="$(tr -d '[:space:]' < "$KIT_ROOT/VERSION")"
 
 log() { printf '\n==> %s\n' "$*"; }
 backup_if_exists() {
@@ -22,6 +23,19 @@ sudo apt-get install -y \
   python3 python3-venv python3-pip
 
 git lfs install
+
+log "Workflow-kit version preflight"
+INSTALLED_GLOBAL_VERSION="$(cat "$CODEX_HOME/workflow-kit-version" 2>/dev/null | tr -d '[:space:]' || true)"
+printf 'Installed global hook bundle: %s\n' "${INSTALLED_GLOBAL_VERSION:-unversioned}"
+printf 'Incoming kit:                %s\n' "$KIT_VERSION"
+if [[ -n "$INSTALLED_GLOBAL_VERSION" ]]; then
+  cmp="$(python3 "$KIT_ROOT/scripts/kit-version.py" compare "$INSTALLED_GLOBAL_VERSION" "$KIT_VERSION")" || exit 2
+  if [[ "$cmp" == "1" && "${ALLOW_DOWNGRADE:-0}" != "1" ]]; then
+    echo "ERROR: installed global workflow hook bundle $INSTALLED_GLOBAL_VERSION is newer than incoming $KIT_VERSION." >&2
+    echo "Use ALLOW_DOWNGRADE=1 only for an intentional downgrade." >&2
+    exit 2
+  fi
+fi
 
 log "GitHub CLI"
 if ! command -v gh >/dev/null 2>&1; then
@@ -112,6 +126,8 @@ for hook in prompt_guard.py session_start.py; do
   cp "$KIT_ROOT/codex/hooks/$hook" "$CODEX_HOME/hooks/$hook"
 done
 chmod +x "$CODEX_HOME/hooks/"*.py
+printf '%s\n' "$KIT_VERSION" > "$CODEX_HOME/workflow-kit-version"
+echo "Installed global workflow-kit version: $KIT_VERSION"
 
 log "CLI router"
 mkdir -p "$HOME/.local/bin"

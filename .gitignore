@@ -26,3 +26,6 @@ _tmp*/
 
 # Runtime workflow artifacts when testing this kit in-place
 .codex-artifacts/
+
+# Release artifacts
+dist/

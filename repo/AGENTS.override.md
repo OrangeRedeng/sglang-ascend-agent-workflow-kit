@@ -49,6 +49,20 @@ Once a concrete symbol is found, stop broad semantic discovery and switch to dir
 Do not semantic-search an exact identifier when `rg` can answer it directly.
 Do not read an entire large file when a narrow range/function is enough.
 
+## PR review retrieval budget - mandatory
+
+Broad PR review must be **bounded by changed components**, not by dumping a huge unified diff into context.
+
+1. Start with PR metadata plus `--stat`, `--name-only`, or changed-filename listing.
+2. Classify changed files/components and load only their applicable rules/skills.
+3. Review per file or per component. Initial diff context should normally be about **20-30 lines per hunk**.
+4. **MUST NOT** request multi-file diffs with `--unified=70`, `--unified=80`, or similarly large context as the first review step.
+5. Expand source/diff context only around a suspicious hunk, caller, invariant, or regression hypothesis.
+6. For very large PRs, maintain a short reviewed-files/checklist artifact rather than repeatedly re-reading the whole diff.
+7. Stop retrieval for a component once its changed code paths and relevant callers/invariants are covered.
+
+The goal is complete review coverage with small targeted retrieval, not maximum text ingestion.
+
 ## Large-log contract - mandatory
 
 Treat a log as large when it is at least **1 MiB** or **10,000 lines**. If size is unknown but the log is clearly large/repetitive, treat it as large.
@@ -78,7 +92,7 @@ Before ending a report-only PR review or bounded investigation:
 - If there are no actionable findings, do not create an empty handoff.
 - If GitHub unresolved review threads are the authoritative record, do not duplicate them into a local handoff.
 
-Every new handoff carries metadata used by auto-discovery: `status`, `kind`, PR, branch, repository, worktree, reviewed HEAD, and creation time.
+Every new handoff carries metadata used by auto-discovery: `status`, `kind`, PR, branch, repository, worktree, `topic`, optional `scope`/`objective`, reviewed HEAD, and creation time. Prefer `.codex/scripts/new-handoff.sh <PR> <topic>` for component-specific findings. The helper also records an **active handoff pointer** for that PR/worktree so a later generic `Address #<PR> review` continues the handoff just produced instead of guessing among older open handoffs.
 
 Every handoff body contains only:
 - severity/priority;
@@ -91,8 +105,9 @@ Every handoff body contains only:
 
 ### Consume a handoff
 
-- Auto-discovery resolution order is: current PR -> current branch -> newest open handoff for the same worktree -> only open handoff for the repository.
-- `status: consumed` handoffs are ignored by normal discovery.
+- Auto-discovery first uses the fresh **active handoff pointer** written by the latest review/investigation, then repository + PR/branch/worktree evidence, **task-topic overlap**, and freshness. A generic continuation without an active pointer does not silently resurrect an arbitrary older open handoff.
+- A handoff is stale for auto-selection when it is older than **48 hours**, its reviewed HEAD is not an ancestor of current HEAD, or current HEAD is more than **50 commits** ahead. Stale handoffs remain available for manual inspection but are not silently injected.
+- `status: consumed` handoffs are ignored by normal discovery; consuming the active handoff clears its pointer, while explicitly reopening it restores the pointer.
 - Re-check each item against current HEAD and resulting diff.
 - Mark consumed only after all actionable items are completed or obsolete.
 

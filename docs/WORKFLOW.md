@@ -52,7 +52,7 @@ If actionable findings exist and GitHub unresolved review threads are not alread
 .codex-artifacts/handoffs/pr-34855-review.md
 ```
 
-The handoff contains metadata plus compact implementation findings only.
+The handoff contains metadata plus compact implementation findings only. `new-handoff.sh` also writes an active pointer for the PR/worktree.
 
 ### New implementation session
 
@@ -66,8 +66,8 @@ You normally do **not** provide the handoff path.
 
 Auto-discovery happens twice:
 
-1. `SessionStart` hook resolves an open handoff for the current PR/branch/worktree and injects the path.
-2. `UserPromptSubmit` repeats the check for implementation-like prompts.
+1. `SessionStart` first resolves the fresh active handoff pointer for the current PR/worktree and injects that path.
+2. `UserPromptSubmit` repeats the check for implementation-like prompts and can use task-topic evidence when no active pointer applies.
 
 The implementation agent then must:
 
@@ -110,11 +110,13 @@ This makes discovery deterministic enough to avoid selecting a handoff merely be
 Discovery priority:
 
 ```text
-current PR
-  -> exact current branch
-  -> newest OPEN handoff for the same worktree
-  -> only OPEN handoff for the same repository
+fresh active handoff pointer
+  -> current PR + task-topic match
+  -> exact current branch + task-topic match
+  -> same worktree + task-topic match
 ```
+
+A generic continuation such as `Address #34855 review` is auto-selected only from the active pointer. If that pointer was consumed/cleared, the resolver does not silently fall back to an unrelated historical open handoff.
 
 Consumed handoffs are ignored.
 

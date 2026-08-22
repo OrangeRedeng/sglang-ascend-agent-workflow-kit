@@ -31,7 +31,7 @@ def implementation_like(prompt: str) -> bool:
     return bool(positive.search(prompt)) and not bool(report_only.search(prompt))
 
 
-def resolve(cwd: Path) -> dict | None:
+def resolve(cwd: Path, prompt: str) -> dict | None:
     try:
         root = subprocess.check_output(
             ["git", "rev-parse", "--show-toplevel"], cwd=cwd, text=True,
@@ -44,7 +44,7 @@ def resolve(cwd: Path) -> dict | None:
         return None
     try:
         p = subprocess.run(
-            [sys.executable, str(script), "--cwd", root, "--json"],
+            [sys.executable, str(script), "--cwd", root, "--json", "--prompt", prompt],
             cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             timeout=5, check=False,
         )
@@ -81,7 +81,7 @@ def main() -> int:
         return 0
 
     cwd = Path(str(payload.get("cwd") or ".")).expanduser()
-    result = resolve(cwd)
+    result = resolve(cwd, raw_prompt)
     if not result:
         return 0
 
@@ -102,16 +102,20 @@ def main() -> int:
                 "additionalContext": context,
             },
         }))
-    elif result.get("confidence") == "ambiguous":
+    elif result.get("candidates") and (
+        str(result.get("confidence", "")).startswith("ambiguous")
+        or result.get("confidence") in {"topic-mismatch", "stale-only", "no-active-pointer"}
+    ):
         candidates = ", ".join(result.get("candidates", [])[:5])
         print(json.dumps({
             "suppressOutput": True,
             "hookSpecificOutput": {
                 "hookEventName": "UserPromptSubmit",
                 "additionalContext": (
-                    "Implementation preflight found multiple open handoffs and no safe exact match: "
-                    f"{candidates}. Before broad review/re-discovery, resolve the applicable handoff "
-                    "from current PR/branch evidence. Do not guess from file contents alone."
+                    f"Implementation preflight did not find a safe automatic handoff match "
+                    f"({result.get('confidence')}: {result.get('reason')}). Candidates: {candidates}. "
+                    "Do not consume a stale/unrelated handoff. Continue from current task evidence, or "
+                    "resolve a candidate only when PR/topic/HEAD evidence makes it applicable."
                 ),
             },
         }))
