@@ -51,7 +51,7 @@ def is_handoff_template(path: Path) -> bool:
 def render(meta: dict[str, str], body: str) -> str:
     preferred = [
         "schema", "status", "kind", "pr", "branch", "repo", "worktree",
-        "topic", "scope", "objective", "base_commit", "reviewed_head", "created_at",
+        "topic", "scope", "objective", "base_commit", "reviewed_head", "producer", "consumer", "created_at",
         "consumed_at", "consumed_head",
     ]
     keys = preferred + [k for k in meta if k not in preferred]
@@ -93,6 +93,8 @@ def upgrade_frontmatter(path: Path, root: Path) -> None:
             "objective": "",
             "base_commit": "",
             "reviewed_head": head,
+            "producer": "legacy",
+            "consumer": "codex",
             "created_at": created,
             "consumed_at": "",
             "consumed_head": "",
@@ -110,6 +112,8 @@ def upgrade_frontmatter(path: Path, root: Path) -> None:
         meta.setdefault("objective", "")
         meta.setdefault("base_commit", "")
         meta.setdefault("reviewed_head", "")
+        meta.setdefault("producer", "legacy")
+        meta.setdefault("consumer", "codex")
         meta.setdefault("created_at", "")
         meta.setdefault("consumed_at", "")
         meta.setdefault("consumed_head", "")

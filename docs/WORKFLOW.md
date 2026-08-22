@@ -101,6 +101,7 @@ repository
 worktree
 base commit
 reviewed HEAD
+producer / consumer
 creation time
 consumed time / HEAD
 ```
@@ -201,7 +202,7 @@ One round = one hypothesis + one scoped change + correctness + same benchmark + 
 
 ## 7. One active session per worktree
 
-Parallel Codex sessions must not share an editing worktree.
+Parallel editing-agent sessions must not share an editing worktree, regardless of model provider.
 
 Use Git worktrees for parallel tasks:
 
@@ -212,21 +213,35 @@ git worktree add ../sglang-task-b <branch-b>
 
 Then open each worktree in a separate WSL VS Code window.
 
-## 8. Model routing
+## 8. Multi-model routing
+
+The default CLI router is `ai-task`. The **selected primary backend is authoritative**; provider flexibility exists to manage capacity/cost without changing the SGLang + Ascend engineering contract.
 
 ```text
-Luna / low
-  metadata, PR description, mechanical docs/simple edits
-
-Terra / medium
-  default implementation, conflicts, review fixes, ordinary bugs/refactors
-
-Sol / high
-  deep review, hard NPU correctness, NPUGraph/HCCL/distributed, difficult performance
-
-Sol / xhigh
-  escalation only after a focused high-effort attempt failed
+primary  codex | local | cheap | strong | none
+local    optional self-hosted OpenAI-compatible worker
+cheap    optional high-volume/low-cost API worker
+strong   optional stronger external reviewer/coder
 ```
+
+The slots are configured in `~/.config/sglang-workflow/models.env`; unset external slots are skipped. `AI_ROUTING_MODE=primary` is the default and sends every task to the selected primary backend. If Codex is primary, task kind still chooses `sglang-lite`, `sglang`, `sglang-hard`, or `sglang-xhigh`.
+
+`AI_ROUTING_MODE=hybrid` is explicit opt-in. General cost-sensitive classes may try configured workers before the primary. Correctness-sensitive classes keep the selected primary **first**:
+
+```text
+docs/logs/search        -> local -> cheap -> strong -> primary
+bug/CI/conflict         -> cheap -> local -> strong -> primary
+feature                 -> strong -> cheap -> local -> primary
+review/verify           -> PRIMARY first -> configured worker fallbacks
+Ascend/NPU/distributed  -> PRIMARY first -> configured worker fallbacks
+perf/kernel/deep        -> PRIMARY first -> configured worker fallbacks
+```
+
+For a Codex primary, the last three classes use the matching `sglang-hard`/`sglang-xhigh` profile first. For a self-hosted/API primary, that selected external backend is first; Codex is appended only when `AI_ENABLE_CODEX_FALLBACK=1`.
+
+This ordering is deliberate: **cost routing must never bypass the Ascend compatibility baseline, backend-path verification, profiling/benchmark comparability gates, or required runtime validation**. A worker may perform bounded reconnaissance, but it must preserve evidence in a handoff before escalation rather than inventing unavailable NPU facts.
+
+Automatic fallback only skips unavailable tiers. A worker that actually runs and fails does not silently hand the same problem to the next model; escalate deliberately and preserve useful evidence in a handoff. See [Multi-model routing](MULTI_MODEL.md).
 
 ## 9. Search routing
 

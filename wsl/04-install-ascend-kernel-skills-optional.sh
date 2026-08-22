@@ -2,9 +2,9 @@
 set -euo pipefail
 
 CODE_ROOT="${CODE_ROOT:-$HOME/code}"
-SGLANG="$CODE_ROOT/sglang"
-ASCEND_AWESOME="$CODE_ROOT/awesome-ascend-skills"
-ASCEND_OFFICIAL="$CODE_ROOT/ascend-agent-skills"
+SGLANG="${SGLANG:-$CODE_ROOT/sglang}"
+ASCEND_AWESOME="${ASCEND_AWESOME:-$CODE_ROOT/awesome-ascend-skills}"
+ASCEND_OFFICIAL="${ASCEND_OFFICIAL:-$CODE_ROOT/ascend-agent-skills}"
 
 usage() {
   cat <<'EOF'

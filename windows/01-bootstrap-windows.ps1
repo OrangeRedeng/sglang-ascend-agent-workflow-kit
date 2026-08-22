@@ -88,10 +88,10 @@ if ($code) {
     Write-Host "`n==> VS Code extensions" -ForegroundColor Cyan
     $codePath = if ($code -is [System.Management.Automation.CommandInfo]) { $code.Source } else { [string]$code }
     Ensure-VSCodeExtension -CodeCommand $codePath -ExtensionId "ms-vscode-remote.remote-wsl"
-    Ensure-VSCodeExtension -CodeCommand $codePath -ExtensionId "OpenAI.chatgpt"
+    Write-Host "Model-specific VS Code extensions are installed later by setup.sh after the primary backend is selected." -ForegroundColor DarkGray
 } else {
     Write-Host "VS Code installed, but 'code' CLI was not found in this PowerShell session." -ForegroundColor Yellow
-    Write-Host "Open VS Code once, then install extensions: ms-vscode-remote.remote-wsl and OpenAI.chatgpt." -ForegroundColor Yellow
+    Write-Host "Open VS Code once, then install the ms-vscode-remote.remote-wsl extension." -ForegroundColor Yellow
 }
 
 Write-Host "`n==> WSL2 networking" -ForegroundColor Cyan
@@ -121,7 +121,7 @@ if (-not $hasUbuntu) {
     Write-Host "After reboot, run: wsl -l -v" -ForegroundColor Cyan
     Write-Host "If no distribution is installed, run: wsl --install -d Ubuntu" -ForegroundColor Cyan
     Write-Host "Then run: wsl --shutdown; wsl -d Ubuntu" -ForegroundColor Cyan
-    Write-Host "Create your Linux user and continue with wsl/02-bootstrap-wsl.sh." -ForegroundColor Cyan
+    Write-Host "Create your Linux user, open the extracted kit in WSL, and run ./setup.sh." -ForegroundColor Cyan
     exit 0
 }
 
@@ -130,5 +130,5 @@ Write-Host "Ubuntu already exists. Current WSL distributions:" -ForegroundColor 
 wsl -l -v
 
 Write-Host "`nHost bootstrap complete." -ForegroundColor Green
-Write-Host "Next, in Ubuntu WSL run the kit's wsl/02-bootstrap-wsl.sh, then 03-setup-sglang-workspace.sh." -ForegroundColor Cyan
-Write-Host "Recommended daily UI: from ~/code/sglang run code ., confirm WSL: Ubuntu, then use the Codex sidebar." -ForegroundColor Cyan
+Write-Host "Next, in Ubuntu WSL open the extracted kit directory and run: ./setup.sh" -ForegroundColor Cyan
+Write-Host "The setup wizard will choose the installation level and primary model backend, and will install model-specific tooling only when selected." -ForegroundColor Cyan

@@ -1,17 +1,75 @@
-# Installation
+# Installation and deployment
 
-## 1. Requirements
+The recommended entrypoint is the root `setup.sh` wizard. The older numbered WSL scripts remain implementation helpers and can still be run directly for advanced/manual deployment.
 
-- Windows 11 with hardware virtualization enabled.
-- Administrator access for the Windows bootstrap.
-- Internet access from Windows and WSL.
-- A GitHub account for `gh auth login`.
+## Installation model
 
-If a VPN is used on Windows, keep it enabled while testing the WSL network. The bootstrap configures WSL mirrored networking because it is more reliable than the default NAT path for many VPN setups.
+Installation has two independent decisions:
 
-## 2. Windows host setup
+1. **Installation level** - which workflow/tooling components are deployed.
+2. **Primary backend** - which model client handles `ai-task` by default.
 
-Open **Administrator PowerShell** in the repository root:
+Codex is offered as the default primary choice, but it is optional.
+
+The installation architecture is provider-neutral, but the project is not domain-neutral: **SGLang + Ascend development correctness remains the primary objective**. Model selection never disables the NPU-specific skill, compatibility, profiling, or validation contracts in a workflow-enabled installation.
+
+## Installation levels
+
+### Light
+
+Installs only the skill layer into the SGLang worktree:
+
+- bundled SGLang workflow skills from this kit;
+- selected upstream SGLang skills that already exist in the checkout;
+- core Ascend/`torch_npu` expert skills linked from the supported Ascend skill repositories;
+- a small version marker and Git exclude entry for `.agents/`.
+
+Light does **not** install:
+
+- Codex;
+- OpenCode;
+- `ai-task`;
+- lifecycle hooks;
+- Semble;
+- Serena;
+- BBuf and optional kernel-specific skill bundles;
+- `.codex-artifacts/` runtime state.
+
+Use Light when another agent/harness will consume the SGLang + Ascend skill layer directly. It may clone/update the upstream Ascend skill sources needed to populate that layer, but it installs no model client or orchestration runtime.
+
+### Standard
+
+Installs the normal development workflow:
+
+- core workflow scripts, handoffs, Goals, and log reduction;
+- `ai-task` and explicit tier wrappers;
+- selected primary model client;
+- Semble;
+- GitHub CLI;
+- core Ascend/torch_npu skills;
+- provider-neutral `AGENTS.override.md`;
+- Codex profiles/hooks/extension only when Codex is selected or explicitly installed;
+- OpenCode only when a self-hosted/API backend is selected or configured.
+
+### Full
+
+Adds to Standard:
+
+- BBuf skill repository and selected skills;
+- `sgl-kernel-npu` checkout;
+- optional AscendC/Triton/op-plugin skill bundle;
+- Serena;
+- no additional model harness by default; OpenCode is installed only when a self-hosted/API backend is selected or configured.
+
+Full still does **not** force Codex. A self-hosted or API model can remain the primary backend.
+
+### Custom
+
+Prompts for each major component individually.
+
+## Windows host preparation
+
+Run PowerShell as Administrator:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -19,249 +77,209 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\windows\01-bootstrap-windows.ps1
 ```
 
-The bootstrap installs or verifies:
+The Windows bootstrap installs host prerequisites, VS Code, Remote - WSL, and WSL networking configuration. It deliberately does not install the OpenAI/Codex extension because the model backend is selected later inside the WSL setup wizard.
 
-- Git for Windows;
-- Visual Studio Code;
-- VS Code WSL extension;
-- OpenAI ChatGPT/Codex VS Code extension (recommended daily UI);
-- WSL2 / Ubuntu;
-- `%USERPROFILE%\.wslconfig` networking settings.
+If Windows requests a reboot, reboot before continuing.
 
-The WSL configuration is merged into the existing `[wsl2]` section rather than replacing unrelated user settings:
+## Interactive WSL setup
 
-```ini
-[wsl2]
-networkingMode=mirrored
-dnsTunneling=true
-autoProxy=true
-```
-
-After changing `.wslconfig`, WSL must be restarted:
-
-```powershell
-wsl --shutdown
-```
-
-### First WSL installation
-
-If Windows requires a reboot, reboot before continuing. After reboot:
-
-```powershell
-wsl -l -v
-```
-
-If no Linux distribution is installed:
-
-```powershell
-wsl --install -d Ubuntu
-```
-
-Then:
-
-```powershell
-wsl --shutdown
-wsl -d Ubuntu
-```
-
-Create the Linux username/password requested by Ubuntu.
-
-## 3. WSL bootstrap
-
-From Ubuntu, navigate to the extracted repository. Example for a repository on the Windows desktop:
+Inside Ubuntu/WSL, from the extracted kit directory:
 
 ```bash
-cd /mnt/c/Users/<you>/Desktop/codex-sglang-workflow-kit
+chmod +x setup.sh wsl/*.sh bin/* repo/.codex/scripts/*
+./setup.sh
 ```
 
-Run:
-
-```bash
-chmod +x wsl/*.sh bin/cx-task repo/.codex/scripts/*
-./wsl/02-bootstrap-wsl.sh
-source ~/.bashrc
-```
-
-The script installs:
-
-- build tools (`cmake`, `ninja`, `clang`, `lld`, `ccache`);
-- Git + Git LFS;
-- GitHub CLI;
-- `ripgrep`, `jq`, `fd`;
-- `uv` / `uvx`;
-- Linux Codex CLI;
-- Semble;
-- global Codex profiles, hooks, and aliases.
-
-### Linux Codex path check
-
-WSL may inherit a Windows npm shim from `/mnt/c/...`. The bootstrap rejects it. Verify:
-
-```bash
-which codex
-codex --version
-```
-
-The path must be a Linux path such as `/usr/local/bin/codex` or `$HOME/.local/bin/codex`, **not** `/mnt/c/Users/.../npm/codex`.
-
-## 4. GitHub authentication
-
-```bash
-gh auth login
-```
-
-If WSL cannot open the browser automatically, copy the device URL/code into the Windows browser. After success:
-
-```bash
-gh auth status
-```
-
-Do not rerun login after authentication has already succeeded.
-
-## 5. Verify WSL networking
-
-Especially when using a VPN:
-
-```bash
-getent ahostsv4 registry.npmjs.org
-curl -4 -I --connect-timeout 10 https://registry.npmjs.org/
-npm ping
-```
-
-If DNS resolves but HTTPS times out, see [Troubleshooting: WSL + VPN](TROUBLESHOOTING.md#wsl--vpn-dns-works-but-https-times-out).
-
-## 6. Semble startup and prewarm
-
-The Codex config uses:
-
-```toml
-[mcp_servers.semble]
-command = "uvx"
-args = ["--from", "semble[mcp]", "semble"]
-enabled = true
-startup_timeout_sec = 120
-```
-
-The WSL bootstrap prewarms the Semble CLI/MCP environment and pins the installed MCP package to the exact Semble CLI version in the user copy of `~/.codex/config.toml`. The repository template stays version-agnostic. The first semantic search can still take longer because the embedding model and repository index may need to be cached.
-
-## 7. Create the SGLang workspace
-
-Run from the kit directory:
-
-```bash
-./wsl/03-setup-sglang-workspace.sh
-```
-
-It creates or reuses:
+The wizard is English-only and starts by selecting an installation level. For Standard/Full/Custom, the primary model question is explicit:
 
 ```text
-~/code/
-├── sglang/
-├── sgl-kernel-npu/
-├── AI-Infra-Auto-Driven-SKILLS/
-├── awesome-ascend-skills/
-└── ascend-agent-skills/
+Use Codex as the primary model? [Y/n]
 ```
 
-Keep active development repositories in the Linux filesystem (`~/code/...`), not `/mnt/c/...`.
+If `yes`, Codex is installed/configured and `AI_PRIMARY_BACKEND=codex`.
 
-Then:
+If `no`, choose:
 
-```bash
-cd ~/code/sglang
-code .
+```text
+1) Self-hosted OpenAI-compatible model
+2) External OpenAI-compatible API (strong slot)
+3) Low-cost external OpenAI-compatible API (cheap slot)
+4) No primary model backend
 ```
 
-In VS Code, confirm `WSL: Ubuntu`, open the Codex sidebar, and start a new local session. See [VS Code + Codex](VSCODE.md).
+If Codex is not primary, the wizard can still install Codex as an optional backend. It does not become an automatic fallback unless that behavior is explicitly enabled.
 
-CLI is optional and independent:
+The wizard can also configure optional self-hosted, cheap API, and strong API slots. API keys are entered with hidden terminal input and stored only in:
+
+```text
+~/.config/sglang-workflow/models.env
+```
+
+Permissions are set to `0600`.
+
+## Saved installation manifest
+
+The setup topology is stored separately from secrets:
+
+```text
+~/.config/sglang-workflow/install.env
+```
+
+It records:
+
+- installation level;
+- workspace path;
+- primary backend;
+- routing mode;
+- installed component flags.
+
+It does **not** contain API keys or endpoint credentials. Upgrades use this manifest to redeploy the same topology without repeating every question.
+
+## Primary backend and routing mode
+
+The model configuration contains:
 
 ```bash
+AI_PRIMARY_BACKEND=codex
+AI_ROUTING_MODE=primary
+AI_ENABLE_CODEX_FALLBACK=0
+```
+
+Valid primary values:
+
+```text
+codex
+local
+cheap
+strong
+none
+```
+
+`primary` is the default routing mode. Every automatic task uses the selected primary backend. When Codex is primary, task kind maps to the appropriate Codex profile.
+
+`hybrid` is opt-in. It can select configured local/cheap/strong tiers by task class. If another backend is primary, Codex is included only when:
+
+```bash
+AI_ENABLE_CODEX_FALLBACK=1
+```
+
+This makes Codex replaceable instead of a hard-coded terminal tier.
+
+## Non-interactive deployment
+
+Codex-first Standard install:
+
+```bash
+./setup.sh \
+  --level standard \
+  --primary codex \
+  --routing primary \
+  --non-interactive \
+  --yes
+```
+
+Skills-only deployment:
+
+```bash
+./setup.sh --level light --non-interactive --yes
+```
+
+Self-hosted primary:
+
+```bash
+export AI_LOCAL_BASE_URL=http://server:8000/v1
+export AI_LOCAL_MODEL=your-coder-model
+export AI_LOCAL_API_KEY=not-needed
+./setup.sh \
+  --level standard \
+  --primary local \
+  --routing primary \
+  --non-interactive \
+  --yes
+```
+
+External API primary with a built-in preset:
+
+```bash
+export AI_STRONG_API_KEY=your-api-key
+./setup.sh \
+  --level full \
+  --primary strong \
+  --strong-preset deepseek \
+  --routing primary \
+  --non-interactive \
+  --yes
+```
+
+List provider presets before unattended deployment:
+
+```bash
+./setup.sh --list-model-presets
+```
+
+For custom providers, export `AI_CHEAP_*` or `AI_STRONG_*` (`BASE_URL`, `MODEL`, and `API_KEY`) before setup. Secrets are copied into `models.env` with mode `0600`; they are not written to `install.env`.
+
+Alternative workspace:
+
+```bash
+./setup.sh --workspace /path/to/sglang
+```
+
+## Provider presets
+
+`workflow-configure` and `setup.sh` include convenience presets for public endpoint/model metadata. The router itself remains vendor-neutral. Current presets include DeepSeek, Z.AI/GLM, Kimi Code, MiniMax, OpenRouter Free, Alibaba Cloud Coding Plan, and Alibaba Model Studio Qwen Coder PAYG.
+
+```bash
+workflow-configure --list-presets
+./setup.sh --list-model-presets
+```
+
+Prices, free tiers, model IDs, and source links are documented in [Models, pricing, and free options](MODELS.md). Provider offerings change, so treat the preset as configuration convenience rather than a pricing guarantee.
+
+## Reconfigure models later
+
+```bash
+workflow-configure
+```
+
+This asks again which primary model should be used, can configure optional workers, and updates only `models.env`. It does not reinstall the entire toolchain.
+
+Inspect routing without consuming model tokens:
+
+```bash
+ai-task --dry-run docs "Update documentation"
+ai-task --dry-run bug "Investigate regression"
+ai-task --dry-run review 34855
+ai-task --dry-run npu "Investigate graph mismatch"
+```
+
+## Codex-specific post-install step
+
+Only when Codex is installed, open Codex CLI once and approve the lifecycle hooks:
+
+```text
 cx
+/hooks
 ```
 
-## 8. Optional kernel-specific Ascend skills
+Approve/enable both `SessionStart` and `UserPromptSubmit`, exit Codex, and restart the VS Code WSL window/session.
 
-Install only when the current work touches that layer:
-
-```bash
-./wsl/04-install-ascend-kernel-skills-optional.sh opplugin
-./wsl/04-install-ascend-kernel-skills-optional.sh triton
-./wsl/04-install-ascend-kernel-skills-optional.sh ascendc
-```
-
-## 9. Optional Serena
-
-Do not install Serena immediately unless symbol navigation is already a known bottleneck. After using the base setup for a while:
+Verify:
 
 ```bash
-./wsl/05-install-serena-optional.sh
-```
-
-Append `codex/config/serena.optional.toml` to `~/.codex/config.toml`, restart Codex, and use Serena primarily for callers/references/symbol structure.
-
-## 10. VS Code extension validation
-
-From Ubuntu:
-
-```bash
-cd ~/code/sglang
-code .
-```
-
-In VS Code:
-
-1. confirm the lower-left indicator says `WSL: Ubuntu`;
-2. confirm the Codex/OpenAI extension is enabled;
-3. open the Codex sidebar and start a **new local session**;
-4. use the read-only verification prompt from [VS Code + Codex](VSCODE.md#4-verify-that-the-extension-sees-the-correct-workspace).
-
-After changes to `~/.codex/config.toml` or `~/.codex/.env`, restart the extension/VS Code window and start a new session.
-
-## 11. CLI validation (optional)
-
-From `~/code/sglang`:
-
-```bash
-which codex
-codex --version
-which semble
-find -L .agents/skills -maxdepth 2 -name SKILL.md -print | sort
-```
-
-Start Codex:
-
-```bash
-cx
-```
-
-Inside Codex, verify MCP status with `/mcp`.
-
-## 12. Updating an existing installation
-
-If this kit is already installed and you downloaded a newer archive, do not rerun the complete Windows/WSL bootstrap just to update workflow rules.
-
-From the new kit directory in WSL:
-
-```bash
-./wsl/06-update-existing-workspace.sh
-```
-
-This updates hooks, repo-local rules/skills/scripts, migrates legacy mutable `.codex/{handoffs,goals,logs}` state into `.codex-artifacts/`, and preserves your SGLang Git branch/worktree.
-
-Afterward reload the VS Code WSL window and start a **new Codex session** so `SessionStart` handoff discovery is active.
-
-See [Updating](UPDATING.md).
-
-## Verify installed kit version
-
-After the global bootstrap and workspace setup, the two version markers should match:
-
-```bash
-cat ~/.codex/workflow-kit-version
-cat ~/code/sglang/.codex/KIT_VERSION
 cd ~/code/sglang
 python3 .codex/scripts/workflow-doctor.py
 ```
 
-See [Version tracking](VERSIONING.md) for update history and release policy.
+## Low-level scripts
+
+The setup wizard orchestrates:
+
+```text
+wsl/02-bootstrap-wsl.sh
+wsl/03-setup-sglang-workspace.sh
+wsl/04-install-ascend-kernel-skills-optional.sh
+wsl/05-install-serena-optional.sh
+```
+
+They accept `INSTALL_*` environment flags and are mainly useful for CI, debugging, or custom deployment automation. Normal installation should use `./setup.sh`.

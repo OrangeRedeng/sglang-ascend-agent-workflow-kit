@@ -1,5 +1,7 @@
 # Automation and enforcement
 
+**Project invariant:** automation exists to reinforce the SGLang + Ascend engineering workflow. Model/provider routing must not bypass NPU compatibility, profiling, benchmark-comparability, or runtime-validation gates.
+
 This page answers one practical question: **what happens automatically, and what must you put in the prompt?**
 
 The default rule is: describe the engineering objective. Do not repeat the workflow machinery in every prompt.
@@ -182,7 +184,7 @@ A strategy reversal includes:
 
 ## Parallel sessions
 
-Use **one active Codex session per Git worktree**.
+Use **one active editing-agent session per Git worktree**, regardless of model provider.
 
 If two tasks need to run concurrently, create separate worktrees:
 
@@ -251,3 +253,11 @@ use rg first; use Semble later; reduce logs; find the handoff; do not rereview..
 ```
 
 Those rules belong to the repository workflow layer.
+
+## Multi-model routing - automatic by CLI policy
+
+`ai-task` adds a deterministic model-routing layer before a session starts. It chooses among configured `local`, `cheap`, and `strong` OpenCode tiers or a Codex profile based on the task kind. Unconfigured external tiers are skipped. For review, verification, Ascend/NPU, distributed, kernel, performance, and deep-reasoning task classes, the selected primary backend is always tried first. When that primary is Codex, the matching hard/xhigh Codex profile is used; when the primary is external, that exact backend remains first and Codex is available only when explicitly enabled as a fallback.
+
+This is routing, not automatic correctness escalation. If an external worker actually starts and cannot solve the task, preserve its useful evidence in a handoff and escalate deliberately rather than silently retrying progressively more expensive models.
+
+See [Multi-model routing](MULTI_MODEL.md).

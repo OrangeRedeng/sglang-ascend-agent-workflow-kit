@@ -5,6 +5,7 @@ This workflow kit builds on the work and documentation of several open-source pr
 ## Core tooling
 
 - [OpenAI Codex](https://developers.openai.com/codex/) - coding agent, CLI, configuration, MCP, hooks, profiles, and agent workflows used by this kit.
+- [OpenCode](https://opencode.ai/) - provider-neutral coding-agent harness used for self-hosted and external worker tiers.
 - [SGLang](https://github.com/sgl-project/sglang) - the primary serving repository this workflow targets.
 - [sgl-kernel-npu](https://github.com/sgl-project/sgl-kernel-npu) - Ascend/NPU kernels and related optimized components used by SGLang.
 - [Ascend/pytorch](https://github.com/Ascend/pytorch) - the PyTorch adapter that provides the `torch_npu` runtime used by Ascend PyTorch workloads.
@@ -33,4 +34,4 @@ The session/handoff/Goal/artifact-ledger approach is informed by the SGLang Team
 
 Names and trademarks belong to their respective owners. This repository does not vendor the external skill repositories listed above; setup scripts clone them from their original sources and link selected skills into a local SGLang checkout. Each external project remains governed by its own license and terms.
 
-This workflow kit is an independent project and is not affiliated with or endorsed by OpenAI, the SGLang project, Huawei/Ascend, MinishLab, Oraios, BBuf, or the other projects listed above.
+This workflow kit is an independent project and is not affiliated with or endorsed by OpenAI, OpenCode, the SGLang project, Huawei/Ascend, MinishLab, Oraios, BBuf, or the other projects listed above.

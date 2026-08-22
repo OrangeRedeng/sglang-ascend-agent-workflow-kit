@@ -1,147 +1,123 @@
 # Updating an existing installation
 
-Use this when the workflow kit was already installed into `~/code/sglang` and you downloaded a newer kit archive.
+The updater now reuses the saved installation topology. It does not assume Codex is installed or primary.
 
-The update script changes only the workflow layer. It does **not** reset your SGLang branch, commit, working tree, Git remote, or project code.
+## Recommended update
 
-## Version preflight
-
-Check what is currently installed:
+Extract the new release and run inside WSL:
 
 ```bash
-cat ~/.codex/workflow-kit-version 2>/dev/null || echo unversioned
-cat ~/code/sglang/.codex/KIT_VERSION 2>/dev/null || echo unversioned
+chmod +x setup.sh wsl/*.sh bin/* repo/.codex/scripts/*
+./wsl/06-update-existing-workspace.sh
 ```
 
-The updater performs this comparison automatically. A normal upgrade prints `old -> new`; reinstalling the same version is allowed. If an installed layer is newer than the incoming archive, the updater stops instead of silently downgrading it. For an intentional downgrade only:
+The update wrapper calls:
+
+```bash
+./setup.sh --update
+```
+
+## Saved topology
+
+New installations store non-secret deployment state in:
+
+```text
+~/.config/sglang-workflow/install.env
+```
+
+The updater reuses:
+
+- installation level;
+- workspace path;
+- selected primary backend;
+- routing mode;
+- installed component flags.
+
+It does **not** store or reconstruct API keys there.
+
+Model credentials/endpoints remain in:
+
+```text
+~/.config/sglang-workflow/models.env
+```
+
+That file is preserved.
+
+## Upgrading from a pre-manifest release
+
+If `install.env` does not exist, `setup.sh --update` stops instead of guessing whether Codex or another backend should be installed. Establish the topology once with:
+
+```bash
+./setup.sh
+```
+
+or an explicit non-interactive deployment. Subsequent updates replay that saved manifest without changing `models.env`. This is intentional: upgrading an older Codex-only installation must not silently make Codex the primary backend if you want a different architecture.
+
+## Version and downgrade protection
+
+Universal global marker:
+
+```text
+~/.config/sglang-workflow/workflow-kit-version
+```
+
+Workspace skill marker:
+
+```text
+~/code/sglang/.agents/.workflow-kit-version
+```
+
+Full/core workflow installations also keep the compatibility marker:
+
+```text
+~/code/sglang/.codex/KIT_VERSION
+```
+
+Codex installations additionally keep:
+
+```text
+~/.codex/workflow-kit-version
+```
+
+Accidental downgrades are rejected. For an intentional downgrade only:
 
 ```bash
 ALLOW_DOWNGRADE=1 ./wsl/06-update-existing-workspace.sh
 ```
 
-See [Version tracking](VERSIONING.md).
+## What is preserved
 
-## Recommended update
+The update does not reset the SGLang branch, commit, remotes, worktree, or project code. Existing `.codex-artifacts/` state and `models.env` are preserved. Legacy mutable `.codex/{handoffs,goals,logs}` state is migrated by the workspace helper when applicable.
 
-From the newly extracted kit directory inside WSL:
+## After an update
+
+Always inspect routing without calling a model:
 
 ```bash
-chmod +x wsl/*.sh repo/.codex/scripts/*
-./wsl/06-update-existing-workspace.sh
+ai-task --dry-run review 34855
 ```
 
-Default target:
+If Codex hooks changed and Codex is installed, approve the new/current hook hashes again:
 
 ```text
-~/code/sglang
+cx
+/hooks
 ```
 
-For another worktree/path:
+Then restart the Codex/VS Code session.
+
+For a non-Codex primary backend, no Codex hook action is required.
+
+## Change installation level or primary backend
+
+An update preserves topology. To intentionally change it, rerun:
 
 ```bash
-SGLANG=/path/to/sglang ./wsl/06-update-existing-workspace.sh
+./setup.sh
 ```
 
-## What the updater changes
-
-It:
-
-1. backs up `~/.codex/hooks.json` and existing hook scripts;
-2. installs the new `SessionStart` handoff-discovery hook and updated `UserPromptSubmit` guard;
-3. migrates legacy mutable state:
-
-```text
-.codex/handoffs/ -> .codex-artifacts/handoffs/
-.codex/goals/    -> .codex-artifacts/goals/
-.codex/logs/     -> .codex-artifacts/logs/
-```
-
-4. adds metadata to legacy handoffs when needed and removes accidental runtime `TEMPLATE*.md` copies from old releases;
-5. updates `AGENTS.override.md`, `.codex/scripts/`, `.codex/templates/`, and repo-local skills;
-6. adds `.codex-artifacts/` to `.git/info/exclude`;
-7. records the incoming `VERSION` in the global hook-bundle and workspace markers;
-8. appends the update to `.codex-artifacts/kit-version-history.tsv`;
-9. runs the handoff resolver and workflow doctor as diagnostics.
-
-Existing artifacts are preserved. The migration does not intentionally overwrite a newer artifact with an older legacy copy.
-
-## After updating
-
-Reload Codex so the hook configuration is reread:
+or only change model routing with:
 
 ```bash
-cd ~/code/sglang
-code .
-```
-
-Then in VS Code:
-
-1. confirm `WSL: Ubuntu`;
-2. reload/close the old Codex session;
-3. start a **new local Codex session**.
-
-You can verify discovery manually:
-
-```bash
-python3 .codex/scripts/resolve-handoff.py --json
-```
-
-If there is a matching open handoff, `selected` should contain its path.
-
-## Hook trust verification
-
-After an update that changes `hooks.json`, run:
-
-```bash
-cd ~/code/sglang
-python3 .codex/scripts/workflow-doctor.py
-```
-
-When `codex app-server` is available, the doctor reports Codex's effective runtime state, for example:
-
-```text
-[OK] session_start: Trusted, enabled
-[WARN] user_prompt_submit: Modified, enabled; current hook hash differs from the trusted hash
-```
-
-`Modified` or `Untrusted` means the current command hook will not execute until you review it. Open `cx`, run `/hooks`, approve/enable the affected hook, exit, and reload the VS Code WSL window. If app-server inspection is unavailable, the doctor labels the stored-hash check as **not verified** and `/hooks` remains authoritative.
-
-## Handoff behavior after the update
-
-Review session:
-
-```text
-Review PR #34855. Report only.
-```
-
-creates an open handoff when actionable findings exist.
-
-New implementation session:
-
-```text
-Address the review findings.
-```
-
-should receive the handoff path automatically from the hook. You should no longer have to write:
-
-```text
-Address .codex-artifacts/handoffs/pr-34855-review.md
-```
-
-When implementation completes, Codex should mark the handoff consumed. Manual command:
-
-```bash
-python3 .codex/scripts/handoff-status.py consume \
-  .codex-artifacts/handoffs/pr-34855-review.md
-```
-
-## Hook trust after an update
-
-The updater deliberately does **not** manufacture trusted hashes for command hooks. Codex executes unmanaged user/project hooks only after their current normalized hook hash is trusted. If `hooks.json` changes, use Codex `/hooks` and approve/enable both `SessionStart` and `UserPromptSubmit`, then reload the WSL VS Code window and start a new session.
-
-Verify afterward:
-
-```bash
-cd ~/code/sglang
-python3 .codex/scripts/workflow-doctor.py
+workflow-configure
 ```

@@ -213,3 +213,13 @@ Use `--stdout` only when you intentionally want the focused content printed to t
 ```bash
 .codex/scripts/extract-log-context.py --stdout /tmp/npu-ci.log
 ```
+
+## OpenCode external workers
+
+OpenCode is the harness for `local`, `cheap`, and `strong` model tiers. The workspace contains `opencode.json`, which loads `AGENTS.override.md` and the Semble MCP server. Dynamic provider/model details come from `~/.config/sglang-workflow/models.env` and are injected by `ai-task`; API credentials are not stored in the SGLang checkout.
+
+Use `ai-task --dry-run <kind> ...` to inspect a route. Use `local-task`, `cheap-task`, `strong-task`, or `ai-task --tier ...` when deterministic provider selection matters.
+
+External model selection does not weaken the normal search ladder or artifact contracts. Once an exact path/symbol is known, use direct retrieval; large logs still go through the reducer; report-only actionable findings still become compact handoffs.
+
+See [Multi-model routing](MULTI_MODEL.md).

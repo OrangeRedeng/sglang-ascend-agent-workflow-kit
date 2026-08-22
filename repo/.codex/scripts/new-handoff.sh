@@ -64,6 +64,8 @@ scope:
 objective:
 base_commit: $BASE
 reviewed_head: $HEAD
+producer: ${WORKFLOW_PRODUCER:-codex}
+consumer: ${WORKFLOW_CONSUMER:-codex}
 created_at: $CREATED
 consumed_at:
 consumed_head:

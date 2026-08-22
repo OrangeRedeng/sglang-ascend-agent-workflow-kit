@@ -200,3 +200,22 @@ CLI-specific aliases are not automatic in the extension. Hook behavior can depen
 ## 8. One active session per worktree
 
 Do not run two Codex editing/review sessions against the same SGLang worktree. If you need parallel work, create another Git worktree and open it in a separate WSL VS Code window. This prevents races in Git state, local diffs and handoff state.
+
+## 9. Multi-model companion workflow
+
+The Codex sidebar remains the recommended interactive UI for Codex. `ai-task` is a separate CLI companion that can run self-hosted or external models through OpenCode in the same WSL worktree.
+
+Typical split:
+
+```text
+terminal: ai-task review 34855
+             -> external worker writes compact handoff
+
+VS Code: start a new Codex session
+             -> SessionStart resolves the handoff
+             -> verify / implement / consume
+```
+
+Do not run an editing OpenCode worker and an editing Codex session concurrently in the same worktree. Use a separate `git worktree` for parallel editing.
+
+See [Multi-model routing](MULTI_MODEL.md).

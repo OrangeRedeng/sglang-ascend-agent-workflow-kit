@@ -42,7 +42,7 @@ def split_frontmatter(text: str) -> tuple[dict[str, str], str]:
 def render(meta: dict[str, str], body: str) -> str:
     preferred = [
         "schema", "status", "kind", "pr", "branch", "repo", "worktree",
-        "topic", "scope", "objective", "base_commit", "reviewed_head", "created_at",
+        "topic", "scope", "objective", "base_commit", "reviewed_head", "producer", "consumer", "created_at",
         "consumed_at", "consumed_head",
     ]
     keys = preferred + [k for k in meta if k not in preferred]
@@ -116,6 +116,8 @@ def main() -> int:
     text = path.read_text(encoding="utf-8", errors="replace")
     meta, body = split_frontmatter(text)
     meta.setdefault("schema", "codex-sglang-handoff/v2")
+    meta.setdefault("producer", "unknown")
+    meta.setdefault("consumer", "codex")
 
     root = git_root(path)
     if args.action == "consume":

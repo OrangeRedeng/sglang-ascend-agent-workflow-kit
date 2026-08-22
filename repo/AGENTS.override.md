@@ -1,4 +1,10 @@
-# SGLang local Codex workflow
+# SGLang local multi-model workflow
+
+## Project priority - SGLang + Ascend correctness
+
+This workflow exists first to make SGLang + Ascend engineering correct, reproducible, and efficient. Model-provider choice and token-cost optimization are subordinate to that goal. **MUST NOT** weaken or bypass repository rules, Ascend/`torch_npu` version and runtime preflight, hardware/backend verification, profiling/benchmark comparability gates, or minimal validation in order to use a cheaper/faster model. If required NPU evidence is unavailable, report the uncertainty or move validation to the correct Ascend host/CI environment instead of guessing.
+
+The router selects an execution backend; it does not change the engineering contract. The same relevant `.agents/skills`, handoff/Goal state, search discipline, and Ascend hard gates apply to Codex, OpenCode, self-hosted, and API-backed agents.
 
 The upstream repository's agent conventions live in `.claude/rules/` and `.claude/skills/`.
 Load only the rules/skills relevant to the touched component; do not dump all of them into context.
@@ -9,11 +15,23 @@ Load only the rules/skills relevant to the touched component; do not dump all of
 - **Same goal + same implementation strategy** -> continue the current session.
 - **Same goal + a materially different implementation strategy** -> stop and continue in a **new session**. This includes replacing a many-file fix with a central fix, undoing the just-implemented approach, restoring upstream behavior after pursuing another approach, or changing the root-cause hypothesis.
 - **New objective** -> new session.
-- Use **one active Codex session per Git worktree**. If work must run in parallel, create another `git worktree`; do not let two Codex sessions edit/review the same worktree concurrently.
+- Use **one active editing-agent session per Git worktree**. This applies equally to Codex, OpenCode, self-hosted, and API-backed agents. If work must run in parallel, create another `git worktree`.
 - PR review means report-only unless the prompt explicitly asks to edit.
 - Conflict resolution means conflicts only; do not also refactor, address unrelated comments, or update docs.
 - Address-review work means actionable feedback only.
 - Stop when the requested objective and minimal validation are complete.
+
+## Multi-model routing
+
+`ai-task` is provider-neutral. The installer records a user-selected primary backend (`codex`, `local`, `cheap`, `strong`, or `none`) and a routing mode (`primary` or `hybrid`). Codex is the default choice offered by the installer, but it is not structurally required.
+
+- `primary` mode: every automatic task goes to the selected primary backend. When Codex is primary, task kind selects lite/default/hard/xhigh Codex profiles.
+- `hybrid` mode: bounded task classes may select configured local/cheap/strong workers; the selected primary remains a fallback. Codex participates as a fallback when it is primary or when `AI_ENABLE_CODEX_FALLBACK=1`.
+- Explicit overrides (`local-task`, `cheap-task`, `strong-task`, `cx*`, or `ai-task --tier ...`) always bypass automatic selection.
+
+All editing/review agents MUST follow this file and applicable `.agents/skills`, MUST NOT commit/push unless explicitly requested, and MUST use the same `.codex-artifacts/` handoff/Goal/log contracts when the workflow layer is installed. The `.codex/` directory name is retained for compatibility; its scripts/artifacts are model-agnostic unless a file explicitly documents Codex-specific hooks/configuration.
+
+Do not treat provider fallback as semantic verification. If a worker is uncertain, record that uncertainty in the handoff and escalate deliberately.
 
 ## Mandatory implementation preflight
 
@@ -27,7 +45,7 @@ For any code-changing implementation/fix/address-review task, **before broad exp
    `python3 .codex/scripts/handoff-status.py consume <handoff-path>`.
 6. If work is only partially complete, leave the handoff `status: open` and update its actionable state rather than marking it consumed.
 
-The Codex `SessionStart` and `UserPromptSubmit` hooks also run this resolver automatically and inject the selected path into context. This preflight remains the fallback contract if hooks are unavailable or ignored.
+When Codex is installed, its `SessionStart` and `UserPromptSubmit` hooks also run this resolver automatically and inject the selected path into context. Other agents use the same preflight explicitly unless their harness provides an equivalent integration.
 
 ## SGLang rules
 
@@ -92,7 +110,7 @@ Before ending a report-only PR review or bounded investigation:
 - If there are no actionable findings, do not create an empty handoff.
 - If GitHub unresolved review threads are the authoritative record, do not duplicate them into a local handoff.
 
-Every new handoff carries metadata used by auto-discovery: `status`, `kind`, PR, branch, repository, worktree, `topic`, optional `scope`/`objective`, reviewed HEAD, and creation time. Prefer `.codex/scripts/new-handoff.sh <PR> <topic>` for component-specific findings. The helper also records an **active handoff pointer** for that PR/worktree so a later generic `Address #<PR> review` continues the handoff just produced instead of guessing among older open handoffs.
+Every new handoff carries metadata used by auto-discovery: `status`, `kind`, PR, branch, repository, worktree, `topic`, optional `scope`/`objective`, reviewed HEAD, `producer`/`consumer`, and creation time. Prefer `.codex/scripts/new-handoff.sh <PR> <topic>` for component-specific findings. The helper also records an **active handoff pointer** for that PR/worktree so a later generic `Address #<PR> review` continues the handoff just produced instead of guessing among older open handoffs.
 
 Every handoff body contains only:
 - severity/priority;

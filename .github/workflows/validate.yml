@@ -13,9 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Validate shell scripts
-        run: bash -n wsl/*.sh bin/cx-task repo/.codex/scripts/*.sh
+        run: bash -n setup.sh wsl/*.sh bin/cx-task bin/local-task bin/cheap-task bin/strong-task repo/.codex/scripts/*.sh scripts/package-release.sh
       - name: Validate Python
-        run: python3 -m py_compile codex/hooks/*.py repo/.codex/scripts/*.py scripts/*.py
+        run: python3 -m py_compile bin/ai-task bin/workflow-configure codex/hooks/*.py repo/.codex/scripts/*.py scripts/*.py
       - name: Validate repository metadata
         run: python3 scripts/validate_repo.py
 

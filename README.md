@@ -1,34 +1,40 @@
-# Codex + SGLang + Ascend Workflow Kit
+# SGLang + Ascend Agent Workflow Kit
 
-A reproducible Windows 11 + WSL2 workflow for using OpenAI Codex on SGLang development, with focused support for Ascend NPU, `torch_npu`, profiling, PR review, CI triage, regressions, and performance work.
+A reproducible Windows 11 + WSL2 workflow for SGLang development with **replaceable model backends**. The installer can use Codex, a self-hosted OpenAI-compatible model, or an external OpenAI-compatible API as the primary agent. Codex is offered as the default choice, but it is optional.
 
 The kit is built around one principle: **keep long-lived engineering state in Git and small artifacts, not in an ever-growing chat transcript**.
 
-**Current release:** `v0.1.1` — see [`CHANGELOG.md`](CHANGELOG.md).
+## Project priority: SGLang + Ascend engineering
+
+The primary objective of this project is a **correct, reproducible SGLang + Ascend development workflow**. Replaceable model backends, token-cost routing, and self-hosted/API workers are supporting mechanisms; they must not weaken the SGLang/Ascend contracts. Regardless of the selected primary model, NPU work keeps the same version/runtime/workload preflight, targeted skill routing, profiling and benchmark gates, minimal-change discipline, and validation requirements. A cheaper model is never a substitute for missing hardware evidence or backend-specific verification.
+
+**Current release:** `v0.2.0` - see [`CHANGELOG.md`](CHANGELOG.md).
 
 ## What this repository configures
 
-- Windows 11 + WSL2 Ubuntu with VPN-friendly mirrored networking.
-- Codex VS Code extension as the recommended daily UI, backed by the same WSL Codex configuration, repo instructions, skills, and MCP servers.
-- Codex CLI profiles for terminal-first, remote, and diagnostic work.
-- Codex `SessionStart`/`UserPromptSubmit` hooks that auto-discover matching open handoffs and inject their path into the new implementation session, plus a guard that blocks wasteful standalone `git push` prompts. User-installed command hooks must be explicitly trusted once in Codex before they execute.
-- Semble MCP for conceptual code search, with a longer startup timeout and first-run prewarm.
-- Optional Serena MCP for symbol-aware callers/references/refactoring.
-- SGLang-local session, handoff, Goal, CI, log-analysis, and Ascend skills.
-- Selected upstream SGLang, Ascend, `torch_npu`, profiling, and model-history skills.
+- One interactive entrypoint: `./setup.sh`. It selects the installation level, primary model backend, optional workers, and routing policy, then installs/deploys the chosen components.
+- Four installation levels: `light`, `standard`, `full`, and `custom`.
+- A provider-neutral `ai-task` router. `AI_PRIMARY_BACKEND` can be `codex`, `local`, `cheap`, `strong`, or `none`; `AI_ROUTING_MODE` can be `primary` or `hybrid`.
+- Optional Codex CLI/profiles/hooks and VS Code extension. Nothing Codex-specific is installed in `light`, and Codex can be omitted entirely from other levels.
+- Optional OpenCode harness for self-hosted or external OpenAI-compatible models.
+- Optional self-hosted endpoints such as vLLM, SGLang, llama.cpp, Ollama-compatible gateways, or another compatible server.
+- Optional cloud API workers. Credentials live only in `~/.config/sglang-workflow/models.env`, which is mode `0600` and preserved across upgrades.
+- Provider-neutral repo skills, handoffs, Goals, log reduction, Git-first retrieval, and session discipline. Historical `.codex/` paths are retained for compatibility, but most scripts in that directory are model-agnostic.
+- Codex lifecycle hooks, when Codex is installed, can auto-discover matching open handoffs. Other agents use the same resolver explicitly.
+- Semble, Serena, core Ascend skills, BBuf skills, and kernel-specific skill bundles according to installation level.
 
 ## Why use this workflow?
 
-The goal is not to make every prompt shorter. The main goal is to **avoid repeatedly paying for context that the model no longer needs** and to make the agent choose a cheaper, more precise path to the answer.
+The main goal is to make **SGLang + Ascend development safer, more reproducible, and easier to resume**: establish the correct NPU/runtime baseline, load the owning expert skill, keep investigations bounded, validate the actual backend path, and preserve actionable state outside chat.
 
-The largest savings usually come from session lifecycle and retrieval discipline, not from making final answers terse. Long coding sessions repeatedly carry prior conversation and tool context forward; a small new request can therefore be much more expensive than it looks.
+Token efficiency is a secondary but important benefit. The workflow avoids repeatedly paying for context the model no longer needs and lets optional workers handle bounded low-cost tasks without changing the engineering contract. The largest savings usually come from session lifecycle and retrieval discipline, not from making final answers terse.
 
 | Mechanism | What it changes | Expected token impact | Usability impact |
 |---|---|---:|---|
 | **New objective -> new session** | Stops unrelated history from following the next task | **Very high** for long sessions | Cleaner scope; fewer accidental side quests |
 | **Handoff artifacts + resolver** | Record local actionable findings; an active pointer connects the latest review to the next implementation, while topic + HEAD freshness prevent stale fallback | **High** when one task feeds another | Generic `Address #PR review` prompts no longer need a path and do not guess among old handoffs |
 | **Goal + experiment ledger** | Keeps benchmark state, hypotheses, failures, and next steps in files instead of chat history | **High** for multi-round performance work | Long optimization loops become reproducible and resumable |
-| **Model routing** | Uses Luna/Terra for routine work and Sol only where deeper reasoning is justified | **Direct cost reduction** | Less manual model switching; expensive reasoning is reserved for hard work |
+| **Multi-model routing** | Uses a user-selected primary backend and optional task-specific workers without hard-wiring the workflow to one provider | **Direct Plus/API cost reduction** | Backends can be swapped without rewriting workflow rules |
 | **Session/prompt hooks** | Auto-discover matching open handoffs at session start and implementation prompts; also block standalone `git push`-style turns | **High** when review feeds implementation; avoids repeated discovery | Handoffs become mostly path-free after one-time hook trust approval |
 | **Targeted `rg` / Git first** | Uses exact search when an identifier, error, path, PR, or commit is already known | **Medium to high** | Faster navigation; less tool wandering |
 | **Semble** | Returns small semantic code chunks for conceptual questions instead of grep + full-file reads | **Potentially high retrieval savings** | Natural-language code discovery when the symbol/path is unknown |
@@ -68,7 +74,7 @@ For repository work, **repeated input/context is often the dominant term**. That
 1. **shorter task lifetimes**, not merely shorter prompts;
 2. **small auto-discovered handoff files**, not `/fork`-style duplication of a long transcript;
 3. **targeted retrieval**, not repeatedly reading large files and logs;
-4. **lower-cost models for mechanical work**, with deliberate escalation for correctness/performance problems.
+4. **a replaceable primary backend plus optional lower-cost workers**, with deliberate escalation to the backend you trust for the task.
 
 Semble reports roughly **99% fewer retrieval tokens than grep+read in its own benchmark at comparable recall**. Treat this as a retrieval benchmark, not a promise of 99% lower end-to-end Codex usage: model reasoning, Git operations, tests, and later tool calls still consume context.
 
@@ -88,7 +94,7 @@ Examples:
 Analyze /tmp/npu-ci.log and find the root cause.
 ```
 
-For a large local/downloaded log, Codex should check its size, run `.codex/scripts/extract-log-context.py`, read the focused artifact, and only then inspect narrow raw ranges if necessary.
+For a large local/downloaded log, the active agent should check its size, run `.codex/scripts/extract-log-context.py`, read the focused artifact, and only then inspect narrow raw ranges if necessary.
 
 ```text
 Review PR #31320. Report only.
@@ -106,17 +112,32 @@ The workflow also improves development quality even when token savings are small
 - **Better reproducibility:** performance experiments retain workload, versions, baseline, rejected directions, and artifacts.
 - **Safer Ascend work:** benchmark and profiling skills enforce environment, backend, graph, precision, and distributed-mode gates before conclusions are accepted.
 - **Faster onboarding:** `AGENTS.override.md` and skills encode the search order and repository conventions once, so they do not have to be repeated in every prompt.
-- **Better recovery:** a fresh Codex session can resume from Git + an auto-discovered compact handoff/Goal artifact without replaying the full investigation transcript.
-- **Safer parallel work:** the workflow explicitly requires one active Codex session per Git worktree; real parallelism uses `git worktree` instead of shared mutable state.
+- **Better recovery:** a fresh agent session can resume from Git + an auto-discovered compact handoff/Goal artifact without replaying the full investigation transcript.
+- **Safer parallel work:** the workflow explicitly requires one active editing-agent session per Git worktree; real parallelism uses `git worktree` instead of shared mutable state.
 - **Cheaper reversals:** changing implementation strategy is treated as a new session boundary so abandoned approaches stop inflating later turns.
 
 ### What this kit does *not* claim
 
 There is no fixed percentage of end-to-end token savings. The effect depends on task length, model, repository size, amount of tool use, and how disciplined the session boundaries are. For a one-shot edit, the difference may be small. For a 50- or 200-turn debugging/performance thread, lifecycle discipline can dominate every other optimization.
 
+## Installation levels
+
+The installation level controls **tooling**, while the primary backend is selected independently. For example, `standard + Codex`, `standard + self-hosted`, and `full + external API` are all valid.
+
+| Level | Installs | Model requirement |
+|---|---|---|
+| **Light** | SGLang + core Ascend/`torch_npu` skill layer only | None |
+| **Standard** | Core workflow/router, selected primary client, Semble, core Ascend skills, GitHub CLI | Codex, self-hosted/API, or none |
+| **Full** | Standard + BBuf skills, sgl-kernel-npu, all optional kernel skills, and Serena | Any primary backend; Codex and OpenCode remain optional |
+| **Custom** | Component-by-component selection | Any or none |
+
+`light` deliberately does **not** install Codex, OpenCode, hooks, routers, Semble, Serena, or mutable workflow state. It installs the bundled SGLang skills plus the core Ascend/`torch_npu` expert skills in the SGLang worktree.
+
 ## Quick start
 
-### 1. Windows PowerShell (Administrator)
+### 1. Windows host (recommended for a new machine)
+
+Run PowerShell as Administrator:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -124,81 +145,127 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\windows\01-bootstrap-windows.ps1
 ```
 
-If Windows asks for a reboot, reboot first. Then:
+The Windows bootstrap installs Git, VS Code, Remote - WSL, and WSL networking prerequisites. It **does not install the Codex extension automatically** because the primary backend has not been selected yet.
 
-```powershell
-wsl -l -v
-```
+If WSL asks for a reboot, reboot and start Ubuntu normally.
 
-If no distribution is installed:
+### 2. Run the setup wizard inside Ubuntu / WSL
 
-```powershell
-wsl --install -d Ubuntu
-```
-
-Start Ubuntu:
-
-```powershell
-wsl --shutdown
-wsl -d Ubuntu
-```
-
-### 2. Inside Ubuntu / WSL
-
-From the extracted repository directory:
+From the extracted kit directory:
 
 ```bash
-chmod +x wsl/*.sh bin/cx-task repo/.codex/scripts/*
-./wsl/02-bootstrap-wsl.sh
-source ~/.bashrc
-gh auth login
+chmod +x setup.sh wsl/*.sh bin/* repo/.codex/scripts/*
+./setup.sh
 ```
 
-Then create the SGLang workspace:
-
-```bash
-./wsl/03-setup-sglang-workspace.sh
-cd ~/code/sglang
-```
-
-Approve the two user lifecycle hooks once (Codex intentionally does not auto-trust unmanaged command hooks):
+All installer questions are in English. The wizard first asks for the installation level. For every level except `light`, it then asks explicitly:
 
 ```text
-cx
-/hooks
-# approve/enable SessionStart and UserPromptSubmit, then exit
+Use Codex as the primary model? [Y/n]
 ```
 
-Then verify the installation and open VS Code:
+If the answer is `no`, select a self-hosted OpenAI-compatible model, a stronger external API slot, a low-cost external API slot, or no model backend. Codex can still be installed later as an optional fallback. External API keys and self-hosted endpoints are never required for a Codex-only installation.
+
+Typical choices:
+
+```text
+Light    -> SGLang + Ascend skills only
+Standard -> core workflow; Codex is the default primary choice
+Full     -> extended tooling/skills; primary backend is still selectable
+Custom   -> select every component yourself
+```
+
+The wizard automatically clones/prepares the SGLang workspace, installs the selected clients/tools, writes the install manifest, configures routing, and performs verification.
+
+### Non-interactive deployment
+
+For reproducible setup:
 
 ```bash
-python3 .codex/scripts/workflow-doctor.py
+./setup.sh --level standard --primary codex --routing primary --non-interactive --yes
+```
+
+Self-hosted primary:
+
+```bash
+export AI_LOCAL_BASE_URL=http://server:8000/v1
+export AI_LOCAL_MODEL=your-coder-model
+export AI_LOCAL_API_KEY=not-needed
+./setup.sh --level standard --primary local --routing primary --non-interactive --yes
+```
+
+Full install with DeepSeek as the stronger external primary:
+
+```bash
+export AI_STRONG_API_KEY=your-api-key
+./setup.sh --level full --primary strong --strong-preset deepseek --routing primary --non-interactive --yes
+```
+
+List built-in provider presets:
+
+```bash
+./setup.sh --list-model-presets
+```
+
+### Primary vs hybrid routing
+
+The safe default is:
+
+```text
+AI_ROUTING_MODE=primary
+```
+
+Every `ai-task` request goes to the selected primary backend. If Codex is primary, the task kind still selects `sglang-lite`, `sglang`, `sglang-hard`, or `sglang-xhigh`.
+
+`hybrid` mode is optional. It allows configured local/cheap/strong workers to be selected by task class. If Codex is **not** primary, Codex is not silently privileged; it is used as a hybrid fallback only when `AI_ENABLE_CODEX_FALLBACK=1`.
+
+Inspect without a model call:
+
+```bash
+ai-task --dry-run docs "Update documentation"
+ai-task --dry-run review 34855
+ai-task --dry-run npu "Investigate graph mismatch"
+```
+
+Reconfigure at any time:
+
+```bash
+workflow-configure
+```
+
+### Daily UI
+
+If Codex was selected/installed:
+
+```bash
+cd ~/code/sglang
 code .
 ```
 
-### Recommended daily workflow: VS Code extension
+Approve `SessionStart` and `UserPromptSubmit` once through Codex `/hooks` after installation or hook changes. If Codex was not installed, use the selected OpenCode/self-hosted/API workflow instead; the repository skills and artifact contracts remain the same.
 
-Open the repository with `code .` **from WSL**. In VS Code, confirm the lower-left remote indicator says `WSL: Ubuntu`, then open the Codex sidebar and start a new local session. The extension uses the WSL-side Codex configuration (`~/.codex/config.toml`) after restart/new session, so the default remains Terra/medium with Semble MCP and the repository rules/skills.
-
-Do not run `cx` just to “connect Codex to VS Code”. The extension and CLI are separate clients. Use the extension as the default UI; use `cx` only when you intentionally want a terminal Codex session.
-
-CLI profiles:
+CLI examples:
 
 ```text
-cxl  -> Luna / low       cheap, mechanical work
-cx   -> Terra / medium   default development
-cxh  -> Sol / high       deep review, hard NPU/debug/perf
-cxx  -> Sol / xhigh      escalation only
+ai-task bug "..."          automatic selection
+ai-task --tier primary ...  force configured primary
+local-task ...              force self-hosted slot
+cheap-task ...              force cheap API slot
+strong-task ...             force strong API slot
+cxl / cx / cxh / cxx        available only when Codex is installed
 ```
 
 ## Version tracking
 
-The kit tracks the version of both installed layers:
+The kit tracks provider-neutral installation state first:
 
 ```text
-~/.codex/workflow-kit-version       global hook bundle
-~/code/sglang/.codex/KIT_VERSION    repo-local workflow layer
+~/.config/sglang-workflow/workflow-kit-version   global kit marker
+~/.config/sglang-workflow/install.env             non-secret install topology
+~/code/sglang/.agents/.workflow-kit-version       workspace skill-layer marker
 ```
+
+Core workflow installations also keep `~/code/sglang/.codex/KIT_VERSION` for compatibility. Codex installations additionally keep `~/.codex/workflow-kit-version`.
 
 Check the effective installation from the SGLang worktree:
 
@@ -208,14 +275,16 @@ python3 .codex/scripts/workflow-doctor.py
 
 When the local Codex app-server is available, the doctor also uses Codex `hooks/list` to verify the **effective current hook trust status/hash**, so a changed hook is reported as `Modified` instead of being incorrectly marked OK merely because an old `trusted_hash` entry exists. The doctor never grants hook trust; use `/hooks` for approval.
 
-`wsl/06-update-existing-workspace.sh` prints the installed and incoming versions before changing anything, refuses accidental downgrades, records the successful version in both markers, and appends local update history to `.codex-artifacts/kit-version-history.tsv`. Release history is kept in [`CHANGELOG.md`](CHANGELOG.md); `scripts/package-release.sh` creates a versioned ZIP + SHA-256 sidecar. Details are in [Version tracking](docs/VERSIONING.md).
+`wsl/06-update-existing-workspace.sh` replays the saved install topology, refuses accidental downgrades through the versioned workspace/global layers, records the successful version markers, and appends local update history to `.codex-artifacts/kit-version-history.tsv`. Release history is kept in [`CHANGELOG.md`](CHANGELOG.md); `scripts/package-release.sh` creates a versioned ZIP + SHA-256 sidecar. Details are in [Version tracking](docs/VERSIONING.md).
 
 ## Documentation
 
+- [Models, pricing, and free options](docs/MODELS.md) - current model/provider options, reference prices, free tiers, and self-hosted guidance.
 - [Installation](docs/INSTALLATION.md) - Windows, WSL, VPN, Codex, Semble, workspace setup.
 - [VS Code + Codex](docs/VSCODE.md) - recommended extension-first workflow and verification.
 - [Automation](docs/AUTOMATION.md) - what happens automatically, what is instruction-enforced, and what remains manual.
 - [Workflow](docs/WORKFLOW.md) - session boundaries, automatic handoffs, Goals, worktrees, model routing, tests, Git discipline.
+- [Multi-model routing](docs/MULTI_MODEL.md) - self-hosted/OpenCode setup, external tiers, router policy, overrides, and escalation.
 - [Tooling](docs/TOOLING.md) - `rg`, Git, Semble, Serena, model-history skills, prompt guard.
 - [Ascend / NPU](docs/ASCEND.md) - `torch_npu`, profiling, HCCL, Triton, AscendC, benchmark gates.
 - [Troubleshooting](docs/TROUBLESHOOTING.md) - WSL, VPN/DNS, Windows Codex shim, Semble timeout, GitHub auth, handoff discovery.
@@ -237,16 +306,30 @@ The printable one-page daily reference is [PRINT_RULES.pdf](PRINT_RULES.pdf).
 ├── ACKNOWLEDGEMENTS.md
 ├── CONTRIBUTING.md
 ├── LICENSE
+├── setup.sh               # interactive/non-interactive installer and deployment entrypoint
 ├── windows/               # Windows host bootstrap
 ├── wsl/                   # WSL + workspace bootstrap
-├── codex/                 # global Codex config/profiles/hooks
+├── codex/                 # optional Codex config/profiles/hooks
+├── opencode/              # optional OpenCode config + model env template
 ├── repo/                  # files copied into local SGLang checkout
-├── bin/                   # task/profile router
+├── bin/                   # Codex and multi-model task routers
 ├── scripts/               # repository validation helper
 ├── docs/                  # user documentation
 │   └── source/            # editable source for PRINT_RULES.pdf
 └── .github/workflows/     # repository validation
 ```
+
+## Publishing as a Git repository
+
+The archive intentionally does **not** contain a `.git/` directory. After extracting it:
+
+```bash
+git init
+git add .
+git commit -m "Initial workflow kit"
+```
+
+Then add your remote and push normally.
 
 ## Scope and safety
 

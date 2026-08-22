@@ -1,6 +1,6 @@
 # Version tracking
 
-The workflow kit uses Semantic Versioning and keeps one source-of-truth release number in the repository root:
+The workflow kit uses Semantic Versioning. The release source of truth is:
 
 ```text
 VERSION
@@ -8,83 +8,93 @@ VERSION
 
 Release history is recorded in [`CHANGELOG.md`](../CHANGELOG.md).
 
-## Installed versions
+## Provider-neutral installed markers
 
-The kit has two layers, so it tracks two installed version markers:
+Global workflow version:
 
 ```text
-~/.codex/workflow-kit-version       global Codex hook bundle
-~/code/sglang/.codex/KIT_VERSION    repo-local workflow/scripts/skills layer
+~/.config/sglang-workflow/workflow-kit-version
 ```
 
-Normally both should contain the same version. Check them with:
+Workspace skill-layer version:
 
-```bash
-cat ~/.codex/workflow-kit-version
-cat ~/code/sglang/.codex/KIT_VERSION
+```text
+<sglang>/.agents/.workflow-kit-version
 ```
 
-Or from the SGLang worktree:
+Core/full workflow installations also retain the historical compatibility marker:
 
-```bash
-python3 .codex/scripts/workflow-doctor.py
+```text
+<sglang>/.codex/KIT_VERSION
 ```
 
-The doctor reports `OK` when the global and workspace versions match, and warns when a layer is missing or out of sync.
+When Codex is installed, its global bundle also keeps:
+
+```text
+~/.codex/workflow-kit-version
+```
+
+Codex-specific markers are no longer required for a non-Codex or Light installation.
+
+## Installation manifest
+
+Topology is stored in:
+
+```text
+~/.config/sglang-workflow/install.env
+```
+
+This records installation level, workspace, primary backend, routing mode, and component flags. It never contains API keys.
+
+Model endpoint credentials are stored separately in:
+
+```text
+~/.config/sglang-workflow/models.env
+```
 
 ## Updating
 
-`wsl/06-update-existing-workspace.sh` reads the incoming kit `VERSION` before making changes and prints:
+`wsl/06-update-existing-workspace.sh` delegates to `setup.sh --update`. The setup entrypoint reads the saved manifest and redeploys the same topology.
 
-```text
-Global Codex layer: 0.1.0
-Workspace layer:    0.1.0
-Incoming kit:       0.2.0
-```
-
-After a successful update it writes both installed markers and appends an audit row to:
+Core/full workflow updates append local audit history to:
 
 ```text
 .codex-artifacts/kit-version-history.tsv
 ```
 
-The history contains UTC timestamp, action, previous workspace version, and new version. Runtime history stays local because `.codex-artifacts/` is Git-ignored.
-
-The updater refuses a downgrade when either installed layer is newer than the incoming kit. An intentional downgrade requires:
+The updater refuses an accidental downgrade. For an intentional downgrade only:
 
 ```bash
 ALLOW_DOWNGRADE=1 ./wsl/06-update-existing-workspace.sh
 ```
 
-Reapplying the same version is allowed and remains useful for repairing configuration drift.
+Reapplying the same version is allowed.
 
 ## Release policy
 
 Use:
 
-- **PATCH** for compatible bug fixes, rule clarifications, and installer fixes;
-- **MINOR** for new workflow mechanisms, skills, hooks, or artifact formats that remain backward-compatible;
-- **MAJOR** for incompatible install/layout/configuration changes requiring manual migration.
+- **PATCH** for compatible bug fixes and documentation/installer corrections;
+- **MINOR** for backward-compatible workflow, router, installation-level, or artifact features;
+- **MAJOR** for incompatible layout/configuration changes requiring manual migration.
 
-Before publishing a release:
+Validate before publishing:
 
 ```bash
 python3 scripts/kit-version.py verify
 python3 scripts/validate_repo.py
 ```
 
-Then create a Git tag matching `VERSION`, for example:
+Create a matching tag, for example:
 
 ```bash
 git tag -a v0.2.0 -m "v0.2.0"
 git push origin v0.2.0
 ```
 
-CI rejects a `vX.Y.Z` tag when it does not match the repository `VERSION`.
+CI rejects a `vX.Y.Z` tag that does not match `VERSION`.
 
-## Build a versioned archive
-
-Create the distributable ZIP and SHA-256 sidecar from `VERSION`:
+## Build archive
 
 ```bash
 ./scripts/package-release.sh
@@ -96,5 +106,3 @@ Output:
 dist/codex-sglang-workflow-kit-vX.Y.Z.zip
 dist/codex-sglang-workflow-kit-vX.Y.Z.zip.sha256
 ```
-
-The packaging script runs version/repository validation first and excludes Git metadata, caches, temporary files, prior ZIPs, and `dist/` itself.

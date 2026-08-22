@@ -1,17 +1,17 @@
-# CODEX + SGLANG / ASCEND - Daily Rules
+# MULTI-MODEL + SGLANG / ASCEND - Daily Rules
 
 **You describe the engineering objective. Hooks + repo rules handle the workflow.**
 
 ## Daily start
 
-**Default UI:** `cd ~/code/sglang && code .` -> confirm **WSL: Ubuntu** -> Codex sidebar -> new local session.
+**Workspace:** `cd ~/code/sglang && code .` -> confirm **WSL: Ubuntu** -> use the model client selected during setup. `light` installs skills only.
 
 ## First decision
 
 - **Same goal + same strategy** -> continue.
 - **Same goal + new strategy** -> **NEW SESSION**.
 - **New goal** -> **NEW SESSION**.
-- **Parallel work** -> another `git worktree`; one active Codex session per worktree.
+- **Parallel work** -> another `git worktree`; one editing agent per worktree.
 
 ## Handoffs - path discovery is automatic
 
@@ -46,10 +46,13 @@ If `>= 1 MiB` **or** `>= 10,000 lines`:
 
 ## Model routing
 
-- **Luna / low:** metadata, PR description, docs, mechanical.
-- **Terra / medium:** default development.
-- **Sol / high:** deep review, hard Ascend correctness, HCCL/NPUGraph/perf.
-- **Sol / xhigh:** escalation only.
+- **primary mode:** every task uses the selected primary backend.
+- **local / cheap / strong:** optional OpenAI-compatible worker slots.
+- **hybrid mode:** opt-in task-class routing between configured backends.
+- **Codex primary:** review/verify/Ascend/NPU/distributed/perf/kernel stay Codex-hard first.
+- **Non-Codex primary:** Codex appears only with explicit fallback.
+
+`ai-task --dry-run ...` shows the route. Explicit tier wrappers override automatic routing.
 
 ## Ascend hard gates
 

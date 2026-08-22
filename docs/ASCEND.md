@@ -2,6 +2,18 @@
 
 The repository adds a thin SGLang-specific routing layer over existing SGLang, Ascend, and `torch_npu` skills. The goal is to load the smallest relevant expert workflow instead of putting every NPU rule into every session.
 
+**This is the primary domain workflow of the project.** Multi-model routing, self-hosted backends, and token-cost optimization are subordinate to SGLang + Ascend correctness. Changing the primary model changes only the execution backend; it must not bypass any compatibility baseline, skill-routing rule, profiler collection discipline, benchmark hard stop, or validation requirement below.
+
+## Model-backend invariant
+
+The same Ascend contract applies whether the active agent is Codex, OpenCode with a self-hosted model, or an external API model:
+
+1. establish the real runtime/backend/version/workload baseline before version-sensitive conclusions;
+2. load only the owning SGLang/Ascend/`torch_npu` skill(s);
+3. use the actual Ascend host or CI environment for runtime facts that local WSL cannot establish;
+4. stop rather than infer CUDA/NCCL semantics onto Ascend/HCCL/NPUGraph;
+5. validate the original failing NPU path before claiming a fix or performance result.
+
 ## Compatibility baseline
 
 Before version-sensitive diagnosis or benchmarking, record:

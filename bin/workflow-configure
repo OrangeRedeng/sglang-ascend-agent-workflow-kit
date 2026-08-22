@@ -1,0 +1,338 @@
+#!/usr/bin/env python3
+"""Configure primary and optional model backends for the SGLang workflow kit."""
+from __future__ import annotations
+
+import argparse
+from getpass import getpass
+from pathlib import Path
+import os
+import shlex
+
+CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "sglang-workflow" / "models.env"
+VALID_PRIMARY = {"codex", "local", "cheap", "strong", "none"}
+SLOTS = ("local", "cheap", "strong")
+
+# Presets contain only public endpoint/model metadata. Secrets are always entered
+# separately and stored only in ~/.config/sglang-workflow/models.env (0600).
+PRESETS: dict[str, dict[str, object]] = {
+    "deepseek": {
+        "label": "DeepSeek V4",
+        "base": "https://api.deepseek.com",
+        "cheap_model": "deepseek-v4-flash",
+        "strong_model": "deepseek-v4-pro",
+        "context": 1048576,
+        "output": 65536,
+    },
+    "zai-free": {
+        "label": "Z.AI free GLM",
+        "base": "https://api.z.ai/api/paas/v4",
+        "model": "glm-4.7-flash",
+        "context": 204800,
+        "output": 131072,
+    },
+    "zai-coding": {
+        "label": "Z.AI GLM Coding Plan",
+        "base": "https://api.z.ai/api/coding/paas/v4",
+        "model": "glm-5.3",
+        "context": 1048576,
+        "output": 65536,
+    },
+    "kimi-code": {
+        "label": "Kimi Code membership",
+        "base": "https://api.kimi.com/coding/v1",
+        "model": "k3-256k",
+        "context": 262144,
+        "output": 65536,
+    },
+    "minimax": {
+        "label": "MiniMax API",
+        "base": "https://api.minimax.io/v1",
+        "model": "MiniMax-M2.7",
+        "context": 204800,
+        "output": 32768,
+    },
+    "openrouter-free": {
+        "label": "OpenRouter free-model router",
+        "base": "https://openrouter.ai/api/v1",
+        "model": "openrouter/free",
+        "context": 200000,
+        "output": 16384,
+    },
+    "alibaba-payg": {
+        "label": "Alibaba Model Studio Qwen Coder PAYG",
+        "base": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "cheap_model": "qwen3-coder-flash",
+        "strong_model": "qwen3-coder-plus",
+        "context": 1000000,
+        "output": 65536,
+    },
+    "alibaba-coding": {
+        "label": "Alibaba Cloud Coding Plan (international)",
+        "base": "https://coding-intl.dashscope.aliyuncs.com/v1",
+        "model": "qwen3-coder-plus",
+        "context": 1048576,
+        "output": 65536,
+    },
+}
+
+
+def read_env(path: Path) -> dict[str, str]:
+    data: dict[str, str] = {}
+    if not path.exists():
+        return data
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key, value = key.strip(), value.strip()
+        if value and value[:1] in {'"', "'"}:
+            try:
+                value = shlex.split(value)[0]
+            except Exception:
+                pass
+        data[key] = value
+    return data
+
+
+def ask_yes_no(prompt: str, default: bool) -> bool:
+    suffix = " [Y/n] " if default else " [y/N] "
+    while True:
+        value = input(prompt + suffix).strip().lower()
+        if not value:
+            return default
+        if value in {"y", "yes"}:
+            return True
+        if value in {"n", "no"}:
+            return False
+        print("Please answer yes or no.")
+
+
+def ask(prompt: str, default: str = "") -> str:
+    suffix = f" [{default}] " if default else " "
+    value = input(prompt + suffix).strip()
+    return value or default
+
+
+def apply_preset(data: dict[str, str], slot: str, preset_name: str) -> None:
+    preset = PRESETS[preset_name]
+    prefix = f"AI_{slot.upper()}_"
+    model = str(preset.get(f"{slot}_model") or preset.get("model") or "")
+    data[prefix + "BASE_URL"] = str(preset["base"])
+    data[prefix + "MODEL"] = model
+    data[prefix + "CONTEXT"] = str(preset["context"])
+    data[prefix + "OUTPUT"] = str(preset["output"])
+    data[prefix + "NPM"] = "@ai-sdk/openai-compatible"
+
+
+def choose_preset(slot: str) -> str | None:
+    print("\nProvider preset (prices and notes: docs/MODELS.md):")
+    names = list(PRESETS)
+    for idx, name in enumerate(names, 1):
+        print(f"  {idx}) {PRESETS[name]['label']} ({name})")
+    print(f"  {len(names) + 1}) Custom OpenAI-compatible endpoint")
+    choice = ask("Selection:", str(len(names) + 1))
+    if choice.isdigit():
+        index = int(choice)
+        if 1 <= index <= len(names):
+            return names[index - 1]
+        if index == len(names) + 1:
+            return None
+    if choice in PRESETS:
+        return choice
+    if choice in {"custom", "none"}:
+        return None
+    raise SystemExit("Invalid provider preset selection.")
+
+
+def configure_slot(
+    data: dict[str, str],
+    slot: str,
+    *,
+    self_hosted: bool = False,
+    interactive: bool = True,
+    preset_name: str | None = None,
+) -> None:
+    prefix = f"AI_{slot.upper()}_"
+    if preset_name:
+        apply_preset(data, slot, preset_name)
+    elif interactive and not self_hosted:
+        selected = choose_preset(slot)
+        if selected:
+            apply_preset(data, slot, selected)
+
+    # Exported AI_<SLOT>_* values are the unattended-deployment interface.
+    for suffix in ("BASE_URL", "MODEL", "API_KEY", "NPM", "CONTEXT", "OUTPUT", "PROVIDER_ID"):
+        key = prefix + suffix
+        if os.environ.get(key):
+            data[key] = os.environ[key]
+
+    default_base = data.get(prefix + "BASE_URL", "")
+    if self_hosted and not default_base:
+        default_base = "http://127.0.0.1:8000/v1"
+
+    if interactive:
+        print(f"\nConfigure {slot} backend")
+        data[prefix + "BASE_URL"] = ask("OpenAI-compatible base URL:", default_base)
+        data[prefix + "MODEL"] = ask("Model ID:", data.get(prefix + "MODEL", ""))
+        data[prefix + "CONTEXT"] = ask("Context window:", data.get(prefix + "CONTEXT", "131072" if self_hosted else "262144"))
+        data[prefix + "OUTPUT"] = ask("Maximum output tokens:", data.get(prefix + "OUTPUT", "16384" if self_hosted else "32768"))
+
+        current_key = data.get(prefix + "API_KEY", "not-needed" if self_hosted else "")
+        if current_key and current_key != "not-needed":
+            print("An API key is already configured. Leave the next field empty to keep it.")
+        secret = getpass("API key (hidden; empty keeps current/not-needed): ").strip()
+        if secret:
+            data[prefix + "API_KEY"] = secret
+        elif prefix + "API_KEY" not in data:
+            data[prefix + "API_KEY"] = "not-needed" if self_hosted else ""
+    else:
+        if not data.get(prefix + "BASE_URL"):
+            data[prefix + "BASE_URL"] = default_base
+        data.setdefault(prefix + "API_KEY", "not-needed" if self_hosted else "")
+        data.setdefault(prefix + "CONTEXT", "131072" if self_hosted else "262144")
+        data.setdefault(prefix + "OUTPUT", "16384" if self_hosted else "32768")
+
+    data.setdefault(prefix + "NPM", "@ai-sdk/openai-compatible")
+    if not data.get(prefix + "BASE_URL") or not data.get(prefix + "MODEL"):
+        raise SystemExit(
+            f"{slot} backend is incomplete. Set {prefix}BASE_URL and {prefix}MODEL "
+            "(export them for unattended setup) or run workflow-configure interactively."
+        )
+    if not self_hosted and not data.get(prefix + "API_KEY"):
+        raise SystemExit(
+            f"{slot} backend requires an API key. Export {prefix}API_KEY for unattended setup "
+            "or run workflow-configure interactively."
+        )
+
+
+def write_env(path: Path, data: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    order = [
+        "AI_PRIMARY_BACKEND", "AI_ROUTING_MODE", "AI_ENABLE_CODEX_FALLBACK",
+        "AI_LOCAL_BASE_URL", "AI_LOCAL_MODEL", "AI_LOCAL_API_KEY", "AI_LOCAL_NPM", "AI_LOCAL_PROVIDER_ID", "AI_LOCAL_CONTEXT", "AI_LOCAL_OUTPUT",
+        "AI_CHEAP_BASE_URL", "AI_CHEAP_MODEL", "AI_CHEAP_API_KEY", "AI_CHEAP_NPM", "AI_CHEAP_PROVIDER_ID", "AI_CHEAP_CONTEXT", "AI_CHEAP_OUTPUT",
+        "AI_STRONG_BASE_URL", "AI_STRONG_MODEL", "AI_STRONG_API_KEY", "AI_STRONG_NPM", "AI_STRONG_PROVIDER_ID", "AI_STRONG_CONTEXT", "AI_STRONG_OUTPUT",
+        "AI_OPENCODE_AUTO",
+    ]
+    lines = [
+        "# SGLang workflow model configuration.",
+        "# Generated by workflow-configure. Keep this file private.",
+        "# Pricing changes frequently; see docs/MODELS.md in the kit release.",
+        "",
+    ]
+    for key in order:
+        if key in data:
+            value = data[key]
+            if any(ch.isspace() for ch in value) or any(ch in value for ch in "#'\""):
+                value = shlex.quote(value)
+            lines.append(f"{key}={value}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.chmod(path, 0o600)
+
+
+def print_presets() -> None:
+    for name, preset in PRESETS.items():
+        cheap = preset.get("cheap_model") or preset.get("model") or ""
+        strong = preset.get("strong_model") or preset.get("model") or ""
+        print(f"{name:18} {preset['label']}")
+        print(f"  base:   {preset['base']}")
+        print(f"  cheap:  {cheap}")
+        print(f"  strong: {strong}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Configure the SGLang workflow primary and optional model backends.")
+    parser.add_argument("--primary", choices=sorted(VALID_PRIMARY))
+    parser.add_argument("--routing", choices=["primary", "hybrid"])
+    parser.add_argument("--codex-fallback", choices=["yes", "no"])
+    parser.add_argument("--slot", choices=SLOTS, help="Configure only one external slot and exit.")
+    parser.add_argument("--preset", choices=sorted(PRESETS), help="Provider preset for --slot.")
+    parser.add_argument("--list-presets", action="store_true")
+    parser.add_argument("--non-interactive", action="store_true")
+    args = parser.parse_args()
+
+    if args.list_presets:
+        print_presets()
+        return 0
+
+    data = read_env(CONFIG)
+    data.setdefault("AI_PRIMARY_BACKEND", "codex")
+    data.setdefault("AI_ROUTING_MODE", "primary")
+    data.setdefault("AI_ENABLE_CODEX_FALLBACK", "0")
+    data.setdefault("AI_OPENCODE_AUTO", "1")
+
+    if args.slot:
+        configure_slot(
+            data,
+            args.slot,
+            self_hosted=args.slot == "local",
+            interactive=not args.non_interactive,
+            preset_name=args.preset,
+        )
+        write_env(CONFIG, data)
+        print(f"Configuration saved: {CONFIG}")
+        print(f"Configured slot: {args.slot}")
+        return 0
+
+    if args.non_interactive:
+        if args.primary:
+            data["AI_PRIMARY_BACKEND"] = args.primary
+        if args.routing:
+            data["AI_ROUTING_MODE"] = args.routing
+        if args.codex_fallback:
+            data["AI_ENABLE_CODEX_FALLBACK"] = "1" if args.codex_fallback == "yes" else "0"
+        write_env(CONFIG, data)
+        print(f"Configuration saved: {CONFIG}")
+        return 0
+
+    print("SGLang workflow model configuration")
+    use_codex = ask_yes_no("Use Codex as the primary model?", data.get("AI_PRIMARY_BACKEND", "codex") == "codex")
+    if use_codex:
+        primary = "codex"
+    else:
+        print("\nChoose the primary backend:")
+        print("  1) Self-hosted OpenAI-compatible model")
+        print("  2) External OpenAI-compatible API (strong slot)")
+        print("  3) Low-cost external OpenAI-compatible API (cheap slot)")
+        print("  4) No primary model backend")
+        choice = ask("Selection:", "1")
+        primary = {"1": "local", "2": "strong", "3": "cheap", "4": "none"}.get(choice, "")
+        if not primary:
+            raise SystemExit("Invalid selection.")
+        if primary == "local":
+            configure_slot(data, "local", self_hosted=True)
+        elif primary == "strong":
+            configure_slot(data, "strong", self_hosted=False)
+        elif primary == "cheap":
+            configure_slot(data, "cheap", self_hosted=False)
+
+    data["AI_PRIMARY_BACKEND"] = primary
+
+    if primary != "cheap" and ask_yes_no("Configure an optional low-cost API worker?", False):
+        configure_slot(data, "cheap", self_hosted=False)
+    if primary != "local" and ask_yes_no("Configure an optional self-hosted worker?", False):
+        configure_slot(data, "local", self_hosted=True)
+    if primary not in {"strong", "none"} and ask_yes_no("Configure an optional stronger API worker?", False):
+        configure_slot(data, "strong", self_hosted=False)
+
+    if ask_yes_no("Enable hybrid automatic routing between configured backends?", False):
+        data["AI_ROUTING_MODE"] = "hybrid"
+    else:
+        data["AI_ROUTING_MODE"] = "primary"
+
+    if primary != "codex":
+        data["AI_ENABLE_CODEX_FALLBACK"] = "1" if ask_yes_no("Use Codex as an optional fallback when it is installed?", False) else "0"
+    else:
+        data["AI_ENABLE_CODEX_FALLBACK"] = "0"
+
+    write_env(CONFIG, data)
+    print(f"\nConfiguration saved: {CONFIG}")
+    print(f"Primary backend: {data['AI_PRIMARY_BACKEND']}")
+    print(f"Routing mode:    {data['AI_ROUTING_MODE']}")
+    print("Use `ai-task --dry-run review 12345` to inspect routing without calling a model.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
