@@ -105,6 +105,10 @@ def topic_from_name(name: str) -> str:
     return stem
 
 
+def is_handoff_template(path: Path) -> bool:
+    return bool(re.match(r"^TEMPLATE(?:[-_.].*)?\.md$", path.name, re.I))
+
+
 def git_distance(root: Path, reviewed_head: str, head: str) -> tuple[int | None, bool | None]:
     if not reviewed_head or not head or reviewed_head == head:
         return (0 if reviewed_head and head else None, True if reviewed_head == head and head else None)
@@ -288,6 +292,8 @@ def resolve(root: Path, allow_gh: bool = True, prompt: str = "") -> dict[str, ob
 
     candidates = []
     for path in sorted(artifact_dir.glob("*.md")):
+        if is_handoff_template(path):
+            continue
         rec = candidate_record(path, root, head, now_ts)
         if rec["status"] != "open":
             continue

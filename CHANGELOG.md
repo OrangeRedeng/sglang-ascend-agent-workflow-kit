@@ -2,6 +2,17 @@
 
 All notable workflow-kit changes are recorded here. The project follows Semantic Versioning (`MAJOR.MINOR.PATCH`).
 
+## [0.1.1] - 2026-08-22
+
+Patch release after validating the first versioned installer on an existing SGLang workspace.
+
+### Fixed
+
+- Legacy handoff templates (`TEMPLATE.md`, `TEMPLATE-review.md`, and other `TEMPLATE*.md` files) are never migrated into `.codex-artifacts/handoffs/`, never upgraded as runtime handoffs, and are ignored by the resolver if an old copy already exists.
+- The updater removes accidental runtime `TEMPLATE*.md` copies left by older releases.
+- `workflow-doctor.py` now queries Codex `hooks/list` through the local app-server when available, so it can report the effective current hook trust state (`Trusted`, `Modified`, `Untrusted`, or `Managed`) and detect a stale trusted hash.
+- When runtime hook inspection is unavailable, the doctor explicitly labels the stored trust-entry check as unverified and directs the user to `/hooks`.
+
 ## [0.1.0] - 2026-08-22
 
 First versioned release of the workflow kit.

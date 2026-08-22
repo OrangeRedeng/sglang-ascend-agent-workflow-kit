@@ -53,6 +53,10 @@ cp "$KIT_ROOT/repo/.codex/scripts/migrate-artifacts.py" "$SGLANG/.codex/scripts/
 chmod +x "$SGLANG/.codex/scripts/migrate-artifacts.py"
 python3 "$SGLANG/.codex/scripts/migrate-artifacts.py" --root "$SGLANG" --remove-legacy
 
+# v0.1.1 cleanup: old releases could accidentally migrate template markdown into runtime state.
+find "$SGLANG/.codex-artifacts/handoffs" -maxdepth 1 -type f \
+  -iname 'TEMPLATE*.md' -print -delete 2>/dev/null || true
+
 log "Update static repo-local workflow layer"
 cp "$KIT_ROOT/repo/AGENTS.override.md" "$SGLANG/AGENTS.override.md"
 cp "$KIT_ROOT/repo/.sembleignore" "$SGLANG/.sembleignore"

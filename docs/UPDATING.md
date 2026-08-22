@@ -56,7 +56,7 @@ It:
 .codex/logs/     -> .codex-artifacts/logs/
 ```
 
-4. adds metadata to legacy handoffs when needed;
+4. adds metadata to legacy handoffs when needed and removes accidental runtime `TEMPLATE*.md` copies from old releases;
 5. updates `AGENTS.override.md`, `.codex/scripts/`, `.codex/templates/`, and repo-local skills;
 6. adds `.codex-artifacts/` to `.git/info/exclude`;
 7. records the incoming `VERSION` in the global hook-bundle and workspace markers;
@@ -87,6 +87,24 @@ python3 .codex/scripts/resolve-handoff.py --json
 ```
 
 If there is a matching open handoff, `selected` should contain its path.
+
+## Hook trust verification
+
+After an update that changes `hooks.json`, run:
+
+```bash
+cd ~/code/sglang
+python3 .codex/scripts/workflow-doctor.py
+```
+
+When `codex app-server` is available, the doctor reports Codex's effective runtime state, for example:
+
+```text
+[OK] session_start: Trusted, enabled
+[WARN] user_prompt_submit: Modified, enabled; current hook hash differs from the trusted hash
+```
+
+`Modified` or `Untrusted` means the current command hook will not execute until you review it. Open `cx`, run `/hooks`, approve/enable the affected hook, exit, and reload the VS Code WSL window. If app-server inspection is unavailable, the doctor labels the stored-hash check as **not verified** and `/hooks` remains authoritative.
 
 ## Handoff behavior after the update
 

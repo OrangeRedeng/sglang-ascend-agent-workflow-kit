@@ -50,6 +50,7 @@ for path in [
     "repo/.codex/scripts/resolve-handoff.py",
     "repo/.codex/scripts/handoff-status.py",
     "repo/.codex/scripts/migrate-artifacts.py",
+    "repo/.codex/scripts/workflow-doctor.py",
     "codex/hooks/session_start.py",
     "wsl/06-update-existing-workspace.sh",
     "docs/UPDATING.md",
@@ -140,6 +141,17 @@ contracts = {
         "active-pointer",
         "no-active-pointer",
         "STALE_HOURS = 48",
+        "is_handoff_template",
+    ],
+    "repo/.codex/scripts/migrate-artifacts.py": [
+        "TEMPLATE-review.md",
+        "is_handoff_template",
+    ],
+    "repo/.codex/scripts/workflow-doctor.py": [
+        "hooks/list",
+        "trust_status",
+        "current_hash",
+        "current hash NOT verified",
     ],
     "repo/.codex/scripts/handoff-status.py": [
         ".active-pr-",
@@ -185,6 +197,7 @@ contracts = {
         "workflow-kit-version",
         ".codex/KIT_VERSION",
         "kit-version-history.tsv",
+        "TEMPLATE*.md",
         'EXCLUDE="$SGLANG/$EXCLUDE"',
     ],
 }

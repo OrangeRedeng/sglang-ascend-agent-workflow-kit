@@ -4,7 +4,7 @@ A reproducible Windows 11 + WSL2 workflow for using OpenAI Codex on SGLang devel
 
 The kit is built around one principle: **keep long-lived engineering state in Git and small artifacts, not in an ever-growing chat transcript**.
 
-**Current release:** `v0.1.0` — see [`CHANGELOG.md`](CHANGELOG.md).
+**Current release:** `v0.1.1` — see [`CHANGELOG.md`](CHANGELOG.md).
 
 ## What this repository configures
 
@@ -205,6 +205,8 @@ Check the effective installation from the SGLang worktree:
 ```bash
 python3 .codex/scripts/workflow-doctor.py
 ```
+
+When the local Codex app-server is available, the doctor also uses Codex `hooks/list` to verify the **effective current hook trust status/hash**, so a changed hook is reported as `Modified` instead of being incorrectly marked OK merely because an old `trusted_hash` entry exists. The doctor never grants hook trust; use `/hooks` for approval.
 
 `wsl/06-update-existing-workspace.sh` prints the installed and incoming versions before changing anything, refuses accidental downgrades, records the successful version in both markers, and appends local update history to `.codex-artifacts/kit-version-history.tsv`. Release history is kept in [`CHANGELOG.md`](CHANGELOG.md); `scripts/package-release.sh` creates a versioned ZIP + SHA-256 sidecar. Details are in [Version tracking](docs/VERSIONING.md).
 

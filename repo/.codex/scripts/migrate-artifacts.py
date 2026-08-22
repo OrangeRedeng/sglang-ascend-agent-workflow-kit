@@ -43,6 +43,11 @@ def topic_from_name(name: str) -> str:
     return re.sub(r"^pr-\d+-", "", stem, flags=re.I) or "review"
 
 
+def is_handoff_template(path: Path) -> bool:
+    """Runtime handoff storage must never contain template markdown files."""
+    return bool(re.match(r"^TEMPLATE(?:[-_.].*)?\.md$", path.name, re.I))
+
+
 def render(meta: dict[str, str], body: str) -> str:
     preferred = [
         "schema", "status", "kind", "pr", "branch", "repo", "worktree",
@@ -119,7 +124,7 @@ def copy_tree_contents(src: Path, dst: Path, skip_names: set[str] | None = None)
     count = 0
     dst.mkdir(parents=True, exist_ok=True)
     for item in src.iterdir():
-        if item.name in skip_names:
+        if item.name in skip_names or (item.is_file() and is_handoff_template(item)):
             continue
         target = dst / item.name
         if target.exists():
@@ -150,12 +155,14 @@ def main() -> int:
     legacy_l = root / ".codex" / "logs"
 
     count = 0
-    count += copy_tree_contents(legacy_h, target / "handoffs", {"TEMPLATE.md"})
+    count += copy_tree_contents(legacy_h, target / "handoffs", {"TEMPLATE.md", "TEMPLATE-review.md"})
     count += copy_tree_contents(legacy_g, target / "goals", {"TEMPLATE"})
     count += copy_tree_contents(legacy_l, target / "logs")
 
     upgraded = 0
     for path in (target / "handoffs").glob("*.md"):
+        if is_handoff_template(path):
+            continue
         before = path.read_text(encoding="utf-8", errors="replace")
         upgrade_frontmatter(path, root)
         if path.read_text(encoding="utf-8", errors="replace") != before:
