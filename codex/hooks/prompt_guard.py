@@ -25,7 +25,6 @@ def implementation_like(prompt: str) -> bool:
         r"\b(review|analy[sz]e|investigate|report|summari[sz]e|explain|describe|triage)\b",
         re.I,
     )
-    # Explicit address/fix wording wins even if "review" also appears.
     if re.search(r"\b(address|fix|implement|apply|patch|resolve)\b", prompt, re.I):
         return True
     return bool(positive.search(prompt)) and not bool(report_only.search(prompt))
@@ -58,69 +57,32 @@ def main() -> int:
         payload = json.load(sys.stdin)
     except Exception:
         return 0
-
     raw_prompt = str(payload.get("prompt", ""))
     prompt = normalize(raw_prompt)
-    blocked = {
-        "push", "git push", "push it", "push this", "push it please", "please push",
-    }
+    blocked = {"push", "git push", "push it", "push this", "push it please", "please push"}
     if prompt in blocked:
-        print(json.dumps({
-            "decision": "block",
-            "reason": (
-                "Use the terminal directly for git push; do not spend a Codex turn on a pure push. "
-                "If reasoning/validation is required before pushing, rewrite the prompt to describe it."
-            ),
-        }))
+        print(json.dumps({"decision": "block", "reason": "Use the terminal directly for git push; do not spend a Codex turn on a pure push. If reasoning/validation is required before pushing, rewrite the prompt to describe it."}))
         return 0
-
-    if not implementation_like(raw_prompt):
+    if not implementation_like(raw_prompt) or payload.get("agent_id"):
         return 0
-
-    if payload.get("agent_id"):
-        return 0
-
     cwd = Path(str(payload.get("cwd") or ".")).expanduser()
     result = resolve(cwd, raw_prompt)
     if not result:
         return 0
-
     selected = result.get("selected")
     if selected:
         context = (
             f"Implementation preflight: handoff auto-discovery selected {selected} "
-            f"({result.get('confidence')}: {result.get('reason')}). MUST read it before broad "
-            "exploration, re-verify it against current HEAD, implement only applicable actionable "
-            "items, and do not redo the broad review. If all items are completed/obsolete, mark it "
-            f"consumed with `python3 .codex/scripts/handoff-status.py consume {selected}`. "
+            f"({result.get('confidence')}: {result.get('reason')}). MUST read it before broad exploration, "
+            "re-verify it against current HEAD, implement only applicable actionable items, and do not redo the broad review. "
+            f"If all items are completed/obsolete, mark it consumed with `python3 .codex/scripts/handoff-status.py consume {selected}`. "
             "If this prompt is genuinely unrelated to that handoff, ignore it and continue normally."
         )
-        print(json.dumps({
-            "suppressOutput": True,
-            "hookSpecificOutput": {
-                "hookEventName": "UserPromptSubmit",
-                "additionalContext": context,
-            },
-        }))
-    elif result.get("candidates") and (
-        str(result.get("confidence", "")).startswith("ambiguous")
-        or result.get("confidence") in {"topic-mismatch", "stale-only", "no-active-pointer"}
-    ):
+        print(json.dumps({"suppressOutput": True,"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":context}}))
+    elif result.get("candidates") and (str(result.get("confidence", "")).startswith("ambiguous") or result.get("confidence") in {"topic-mismatch", "stale-only", "no-active-pointer"}):
         candidates = ", ".join(result.get("candidates", [])[:5])
-        print(json.dumps({
-            "suppressOutput": True,
-            "hookSpecificOutput": {
-                "hookEventName": "UserPromptSubmit",
-                "additionalContext": (
-                    f"Implementation preflight did not find a safe automatic handoff match "
-                    f"({result.get('confidence')}: {result.get('reason')}). Candidates: {candidates}. "
-                    "Do not consume a stale/unrelated handoff. Continue from current task evidence, or "
-                    "resolve a candidate only when PR/topic/HEAD evidence makes it applicable."
-                ),
-            },
-        }))
+        print(json.dumps({"suppressOutput":True,"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":f"Implementation preflight did not find a safe automatic handoff match ({result.get('confidence')}: {result.get('reason')}). Candidates: {candidates}. Do not consume a stale/unrelated handoff."}}))
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

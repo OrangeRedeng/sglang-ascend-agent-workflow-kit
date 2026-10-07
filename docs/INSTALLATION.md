@@ -1,285 +1,53 @@
-# Installation and deployment
+# Installation
 
-The recommended entrypoint is the root `setup.sh` wizard. The older numbered WSL scripts remain implementation helpers and can still be run directly for advanced/manual deployment.
-
-## Installation model
-
-Installation has two independent decisions:
-
-1. **Installation level** - which workflow/tooling components are deployed.
-2. **Primary backend** - which model client handles `ai-task` by default.
-
-Codex is offered as the default primary choice, but it is optional.
-
-The installation architecture is provider-neutral, but the project is not domain-neutral: **SGLang + Ascend development correctness remains the primary objective**. Model selection never disables the NPU-specific skill, compatibility, profiling, or validation contracts in a workflow-enabled installation.
-
-## Installation levels
-
-### Light
-
-Installs only the skill layer into the SGLang worktree:
-
-- bundled SGLang workflow skills from this kit;
-- selected upstream SGLang skills that already exist in the checkout;
-- core Ascend/`torch_npu` expert skills linked from the supported Ascend skill repositories;
-- a small version marker and Git exclude entry for `.agents/`.
-
-Light does **not** install:
-
-- Codex;
-- OpenCode;
-- `ai-task`;
-- lifecycle hooks;
-- Semble;
-- Serena;
-- BBuf and optional kernel-specific skill bundles;
-- `.codex-artifacts/` runtime state.
-
-Use Light when another agent/harness will consume the SGLang + Ascend skill layer directly. It may clone/update the upstream Ascend skill sources needed to populate that layer, but it installs no model client or orchestration runtime.
-
-### Standard
-
-Installs the normal development workflow:
-
-- core workflow scripts, handoffs, Goals, and log reduction;
-- `ai-task` and explicit tier wrappers;
-- selected primary model client;
-- Semble;
-- GitHub CLI;
-- core Ascend/torch_npu skills;
-- provider-neutral `AGENTS.override.md`;
-- Codex profiles/hooks/extension only when Codex is selected or explicitly installed;
-- OpenCode only when a self-hosted/API backend is selected or configured.
-
-### Full
-
-Adds to Standard:
-
-- BBuf skill repository and selected skills;
-- `sgl-kernel-npu` checkout;
-- optional AscendC/Triton/op-plugin skill bundle;
-- Serena;
-- no additional model harness by default; OpenCode is installed only when a self-hosted/API backend is selected or configured.
-
-Full still does **not** force Codex. A self-hosted or API model can remain the primary backend.
-
-### Custom
-
-Prompts for each major component individually.
-
-## Windows host preparation
-
-Run PowerShell as Administrator:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\windows\00-preflight.ps1
-.\windows\01-bootstrap-windows.ps1
-```
-
-The Windows bootstrap installs host prerequisites, VS Code, Remote - WSL, and WSL networking configuration. It deliberately does not install the OpenAI/Codex extension because the model backend is selected later inside the WSL setup wizard.
-
-If Windows requests a reboot, reboot before continuing.
-
-## Interactive WSL setup
-
-Inside Ubuntu/WSL, from the extracted kit directory:
+## Recommended
 
 ```bash
-chmod +x setup.sh wsl/*.sh bin/* repo/.codex/scripts/*
-./setup.sh
+chmod +x setup.sh wsl/*.sh bin/* repo/.codex/scripts/* scripts/*.py
+./setup.sh --level standard --primary codex --enable-glm --glm-region china
 ```
 
-The wizard is English-only and starts by selecting an installation level. For Standard/Full/Custom, the primary model question is explicit:
+`standard` keeps Codex/OpenAI + the OpenAI VS Code extension as the daily interface and installs the workflow/handoff/core Ascend layer. Semble and Serena are intentionally not installed by Standard in v0.3.1.
 
-```text
-Use Codex as the primary model? [Y/n]
-```
+Use `--level full` when you also want Semble, Serena, CANNBot, selected KernelHive skills, BBuf skills and `sgl-kernel-npu`.
 
-If `yes`, Codex is installed/configured and `AI_PRIMARY_BACKEND=codex`.
+## Levels
 
-If `no`, choose:
+- `light`: SGLang + bundled/core Ascend skills; no model client/router/hooks.
+- `standard`: Codex-first workflow, OpenAI extension, router, handoffs, core Ascend skills.
+- `full`: Standard + Semble + Serena + CANNBot + selected KernelHive + BBuf + kernel repo.
+- `custom`: choose each component; Semble/Serena default to no.
 
-```text
-1) Self-hosted OpenAI-compatible model
-2) External OpenAI-compatible API (strong slot)
-3) Low-cost external OpenAI-compatible API (cheap slot)
-4) No primary model backend
-```
-
-If Codex is not primary, the wizard can still install Codex as an optional backend. It does not become an automatic fallback unless that behavior is explicitly enabled.
-
-The wizard can also configure optional self-hosted, cheap API, and strong API slots. API keys are entered with hidden terminal input and stored only in:
-
-```text
-~/.config/sglang-workflow/models.env
-```
-
-Permissions are set to `0600`.
-
-## Saved installation manifest
-
-The setup topology is stored separately from secrets:
-
-```text
-~/.config/sglang-workflow/install.env
-```
-
-It records:
-
-- installation level;
-- workspace path;
-- primary backend;
-- routing mode;
-- installed component flags.
-
-It does **not** contain API keys or endpoint credentials. Upgrades use this manifest to redeploy the same topology without repeating every question.
-
-## Primary backend and routing mode
-
-The model configuration contains:
+## GLM Coding Plan
 
 ```bash
-AI_PRIMARY_BACKEND=codex
-AI_ROUTING_MODE=primary
-AI_ENABLE_CODEX_FALLBACK=0
+workflow-configure --enable-glm --glm-region china
+# or global
+workflow-configure --enable-glm --glm-region global
 ```
 
-Valid primary values:
+The secret is stored only in `~/.config/sglang-workflow/models.env` (0600). Codex GLM profiles obtain the token through `workflow-provider-token`; TOML files contain no API key.
 
-```text
-codex
-local
-cheap
-strong
-none
-```
+## Existing Codex configuration
 
-`primary` is the default routing mode. Every automatic task uses the selected primary backend. When Codex is primary, task kind maps to the appropriate Codex profile.
+v0.3.1 does not replace `~/.codex/config.toml`. On a fresh machine it creates only a minimal file if none exists. On an existing setup it preserves user model/reasoning settings, project trust, hook trust hashes, memories and unrelated MCP servers.
 
-`hybrid` is opt-in. It can select configured local/cheap/strong tiers by task class. If another backend is primary, Codex is included only when:
+Hook installation is also merged. After new/changed hook definitions, launch Codex and review `/hooks`.
+
+## External skill pins
+
+`skills.lock.json` contains immutable commit pins. Setup checks out those commits in detached HEAD state and validates selected skills. Use:
 
 ```bash
-AI_ENABLE_CODEX_FALLBACK=1
+workflow-skills status
+workflow-skills snapshot
+workflow-skills index
 ```
 
-This makes Codex replaceable instead of a hard-coded terminal tier.
-
-## Non-interactive deployment
-
-Codex-first Standard install:
+Advancing a dependency is deliberately explicit:
 
 ```bash
-./setup.sh \
-  --level standard \
-  --primary codex \
-  --routing primary \
-  --non-interactive \
-  --yes
+workflow-skills update --only cannbot-skills
 ```
 
-Skills-only deployment:
-
-```bash
-./setup.sh --level light --non-interactive --yes
-```
-
-Self-hosted primary:
-
-```bash
-export AI_LOCAL_BASE_URL=http://server:8000/v1
-export AI_LOCAL_MODEL=your-coder-model
-export AI_LOCAL_API_KEY=not-needed
-./setup.sh \
-  --level standard \
-  --primary local \
-  --routing primary \
-  --non-interactive \
-  --yes
-```
-
-External API primary with a built-in preset:
-
-```bash
-export AI_STRONG_API_KEY=your-api-key
-./setup.sh \
-  --level full \
-  --primary strong \
-  --strong-preset deepseek \
-  --routing primary \
-  --non-interactive \
-  --yes
-```
-
-List provider presets before unattended deployment:
-
-```bash
-./setup.sh --list-model-presets
-```
-
-For custom providers, export `AI_CHEAP_*` or `AI_STRONG_*` (`BASE_URL`, `MODEL`, and `API_KEY`) before setup. Secrets are copied into `models.env` with mode `0600`; they are not written to `install.env`.
-
-Alternative workspace:
-
-```bash
-./setup.sh --workspace /path/to/sglang
-```
-
-## Provider presets
-
-`workflow-configure` and `setup.sh` include convenience presets for public endpoint/model metadata. The router itself remains vendor-neutral. Current presets include DeepSeek, Z.AI/GLM, Kimi Code, MiniMax, OpenRouter Free, Alibaba Cloud Coding Plan, and Alibaba Model Studio Qwen Coder PAYG.
-
-```bash
-workflow-configure --list-presets
-./setup.sh --list-model-presets
-```
-
-Prices, free tiers, model IDs, and source links are documented in [Models, pricing, and free options](MODELS.md). Provider offerings change, so treat the preset as configuration convenience rather than a pricing guarantee.
-
-## Reconfigure models later
-
-```bash
-workflow-configure
-```
-
-This asks again which primary model should be used, can configure optional workers, and updates only `models.env`. It does not reinstall the entire toolchain.
-
-Inspect routing without consuming model tokens:
-
-```bash
-ai-task --dry-run docs "Update documentation"
-ai-task --dry-run bug "Investigate regression"
-ai-task --dry-run review 34855
-ai-task --dry-run npu "Investigate graph mismatch"
-```
-
-## Codex-specific post-install step
-
-Only when Codex is installed, open Codex CLI once and approve the lifecycle hooks:
-
-```text
-cx
-/hooks
-```
-
-Approve/enable both `SessionStart` and `UserPromptSubmit`, exit Codex, and restart the VS Code WSL window/session.
-
-Verify:
-
-```bash
-cd ~/code/sglang
-python3 .codex/scripts/workflow-doctor.py
-```
-
-## Low-level scripts
-
-The setup wizard orchestrates:
-
-```text
-wsl/02-bootstrap-wsl.sh
-wsl/03-setup-sglang-workspace.sh
-wsl/04-install-ascend-kernel-skills-optional.sh
-wsl/05-install-serena-optional.sh
-```
-
-They accept `INSTALL_*` environment flags and are mainly useful for CI, debugging, or custom deployment automation. Normal installation should use `./setup.sh`.
+This updates the private installed lock under `~/.config/sglang-workflow/`; release pins in the repository remain unchanged until deliberately committed in a new kit release.

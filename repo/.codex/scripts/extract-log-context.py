@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Reduce large SGLang/Ascend logs before sending them to an LLM.
+"""Bounded two-stage reducer for large SGLang/Ascend logs.
 
-Keeps head/tail, matched lines with surrounding context, and a frequency summary.
-The original log is never modified. By default the focused output is written to
-.codex-artifacts/logs/<name>.focused.txt so a model tool call does not dump the reduced
-log itself into conversation context.
+Default output is intentionally small (32 KiB / 400 lines). Repeated errors are
+clustered by normalized signature. Use --expand <signature-id-or-text> only when
+the first-stage artifact identifies a concrete missing window.
 """
 from __future__ import annotations
 
 import argparse
-from collections import Counter
+from collections import Counter, deque
+from dataclasses import dataclass, field
+import hashlib
 from pathlib import Path
 import re
 import subprocess
@@ -17,18 +18,20 @@ import subprocess
 DEFAULT_PATTERNS = [
     r"traceback", r"runtimeerror", r"error", r"exception", r"failed", r"fatal",
     r"hccl", r"acl", r"aicore", r"aicpu", r"ez\d+", r"oom", r"out of memory",
-    r"nan", r"inf", r"timeout", r"hang", r"shape", r"dtype", r"unsupported",
+    r"\bnan\b", r"\binf\b", r"timeout", r"hang", r"shape", r"dtype", r"unsupported",
     r"latency", r"throughput", r"tokens?/s", r"tok/s", r"memory",
 ]
+
+TIMESTAMP_RX = re.compile(r"(?:\b\d{4}-\d\d-\d\d[T ][0-9:.+-Z]+\b|\b\d\d:\d\d:\d\d(?:\.\d+)?\b)")
+HEX_RX = re.compile(r"0x[0-9a-fA-F]+")
+RANK_RX = re.compile(r"(?:\[?rank\s*[=:]?\s*\d+\]?|\[\d+\])", re.I)
+NUMBER_RX = re.compile(r"(?<![A-Za-z])\d+(?![A-Za-z])")
+SPACE_RX = re.compile(r"\s+")
 
 
 def git_root() -> Path | None:
     try:
-        out = subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
+        out = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True, stderr=subprocess.DEVNULL).strip()
     except Exception:
         return None
     return Path(out) if out else None
@@ -41,82 +44,213 @@ def safe_name(path: Path) -> str:
 
 def default_output(log: Path) -> Path:
     root = git_root()
-    if root is not None:
-        return root / ".codex-artifacts" / "logs" / f"{safe_name(log)}.focused.txt"
-    return log.with_name(f"{log.name}.focused.txt")
+    return (root / ".codex-artifacts" / "logs" / f"{safe_name(log)}.focused.txt") if root else log.with_name(f"{log.name}.focused.txt")
+
+
+def normalize_signature(line: str) -> str:
+    text = TIMESTAMP_RX.sub("<TS>", line)
+    text = RANK_RX.sub("<RANK>", text)
+    text = HEX_RX.sub("<HEX>", text)
+    text = NUMBER_RX.sub("<N>", text)
+    text = SPACE_RX.sub(" ", text).strip()
+    return text[:500]
+
+
+def sig_id(signature: str) -> str:
+    return hashlib.sha1(signature.encode("utf-8", "replace")).hexdigest()[:10]
+
+
+@dataclass
+class Sample:
+    center: int
+    rows: list[tuple[int, str]] = field(default_factory=list)
+    remaining: int = 0
+
+
+@dataclass
+class Signature:
+    text: str
+    count: int = 0
+    first_line: int = 0
+    last_line: int = 0
+    samples: list[Sample] = field(default_factory=list)
+
+
+def analyze(log: Path, rx: re.Pattern[str], context: int, sample_limit: int, head_n: int, tail_n: int):
+    signatures: dict[str, Signature] = {}
+    pattern_freq: Counter[str] = Counter()
+    head: list[tuple[int, str]] = []
+    tail: deque[tuple[int, str]] = deque(maxlen=tail_n)
+    before: deque[tuple[int, str]] = deque(maxlen=context)
+    active: list[Sample] = []
+    total_lines = 0
+    matched = 0
+
+    with log.open("r", encoding="utf-8", errors="replace") as f:
+        for lineno, raw in enumerate(f, 1):
+            line = raw.rstrip("\n\r")
+            total_lines = lineno
+            if lineno <= head_n:
+                head.append((lineno, line))
+            tail.append((lineno, line))
+
+            # Complete post-context of previously selected samples.
+            still: list[Sample] = []
+            for sample in active:
+                if sample.remaining > 0:
+                    sample.rows.append((lineno, line))
+                    sample.remaining -= 1
+                if sample.remaining > 0:
+                    still.append(sample)
+            active = still
+
+            if rx.search(line):
+                matched += 1
+                normalized = normalize_signature(line)
+                key = sig_id(normalized)
+                entry = signatures.setdefault(key, Signature(normalized))
+                entry.count += 1
+                entry.first_line = entry.first_line or lineno
+                entry.last_line = lineno
+                if len(entry.samples) < sample_limit:
+                    last_center = entry.samples[-1].center if entry.samples else -10**9
+                    if lineno - last_center > max(2 * context + 1, 8):
+                        rows = list(before) + [(lineno, line)]
+                        sample = Sample(center=lineno, rows=rows, remaining=context)
+                        entry.samples.append(sample)
+                        if context:
+                            active.append(sample)
+                lower = line.lower()
+                for token in DEFAULT_PATTERNS:
+                    try:
+                        if re.search(token, lower, re.I):
+                            pattern_freq[token] += 1
+                    except re.error:
+                        pass
+            before.append((lineno, line))
+    return total_lines, matched, signatures, pattern_freq, head, list(tail)
+
+
+def append_bounded(lines: list[str], text: str, max_lines: int, max_bytes: int) -> bool:
+    candidate = text + "\n"
+    current_bytes = sum(len(x.encode("utf-8", "replace")) + 1 for x in lines)
+    if len(lines) >= max_lines or current_bytes + len(candidate.encode("utf-8", "replace")) > max_bytes:
+        return False
+    lines.append(text)
+    return True
+
+
+def render_rows(out: list[str], rows: list[tuple[int, str]], max_lines: int, max_bytes: int) -> bool:
+    prev = None
+    for lineno, text in rows:
+        if prev is not None and lineno > prev + 1:
+            if not append_bounded(out, f"... omitted {lineno - prev - 1} lines ...", max_lines, max_bytes):
+                return False
+        if not append_bounded(out, f"{lineno:8d}: {text}", max_lines, max_bytes):
+            return False
+        prev = lineno
+    return True
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("log", type=Path)
     ap.add_argument("-o", "--output", type=Path)
-    ap.add_argument("--stdout", action="store_true", help="print focused log instead of writing an artifact")
-    ap.add_argument("-C", "--context", type=int, default=8)
-    ap.add_argument("--head", type=int, default=60)
-    ap.add_argument("--tail", type=int, default=80)
-    ap.add_argument("--max-matches", type=int, default=120)
+    ap.add_argument("--stdout", action="store_true")
+    ap.add_argument("-C", "--context", type=int, default=4)
+    ap.add_argument("--head", type=int, default=30)
+    ap.add_argument("--tail", type=int, default=40)
+    ap.add_argument("--samples-per-signature", type=int, default=2)
+    ap.add_argument("--max-signatures", type=int, default=20)
+    ap.add_argument("--max-lines", type=int, default=400)
+    ap.add_argument("--max-bytes", type=int, default=32768)
     ap.add_argument("--pattern", action="append", default=[])
+    ap.add_argument("--expand", default="", help="signature id or text fragment to expand")
     args = ap.parse_args()
 
     log = args.log.expanduser().resolve()
     if not log.is_file():
         ap.error(f"log file not found: {log}")
-
-    text = log.read_text(encoding="utf-8", errors="replace")
-    lines = text.splitlines()
     patterns = DEFAULT_PATTERNS + args.pattern
     rx = re.compile("(?:" + "|".join(patterns) + ")", re.I)
+    total_lines, matched, signatures, freq, head, tail = analyze(
+        log, rx, max(0, args.context), max(1, args.samples_per_signature), max(0, args.head), max(0, args.tail)
+    )
 
-    all_hits = [i for i, line in enumerate(lines) if rx.search(line)]
-    hits = all_hits[: args.max_matches]
+    ranked = sorted(signatures.items(), key=lambda kv: (-kv[1].count, kv[1].first_line))
+    if args.expand:
+        needle = args.expand.lower()
+        ranked = [kv for kv in ranked if kv[0].lower().startswith(needle) or needle in kv[1].text.lower()]
+        if not ranked:
+            raise SystemExit(f"No signature matched --expand {args.expand!r}")
 
-    keep = set(range(min(args.head, len(lines))))
-    keep.update(range(max(0, len(lines) - args.tail), len(lines)))
-    for i in hits:
-        keep.update(range(max(0, i - args.context), min(len(lines), i + args.context + 1)))
-
-    ordered = sorted(keep)
     out: list[str] = []
-    out.append(f"SOURCE: {log}")
-    out.append(f"SOURCE_BYTES: {log.stat().st_size}")
-    out.append(f"TOTAL_LINES: {len(lines)}")
-    out.append(f"MATCHED_LINES_TOTAL: {len(all_hits)}")
-    out.append(f"MATCHED_LINES_INCLUDED: {len(hits)} (cap {args.max_matches})")
-    out.append("")
+    meta = [
+        f"SOURCE: {log}",
+        f"SOURCE_BYTES: {log.stat().st_size}",
+        f"TOTAL_LINES: {total_lines}",
+        f"MATCHED_LINES_TOTAL: {matched}",
+        f"UNIQUE_SIGNATURES: {len(signatures)}",
+        f"OUTPUT_CAP_BYTES: {args.max_bytes}",
+        f"OUTPUT_CAP_LINES: {args.max_lines}",
+        "",
+        "=== ERROR / SIGNAL SIGNATURES ===",
+    ]
+    for row in meta:
+        append_bounded(out, row, args.max_lines, args.max_bytes)
 
-    freq = Counter()
-    for i in all_hits:
-        low = lines[i].lower()
-        for p in patterns:
-            if re.search(p, low, re.I):
-                freq[p] += 1
-    out.append("=== MATCH FREQUENCY ===")
-    for key, count in freq.most_common(30):
-        out.append(f"{count:6d}  {key}")
-    out.append("")
-    out.append("=== FOCUSED LOG ===")
+    for key, entry in ranked[: args.max_signatures]:
+        if not append_bounded(
+            out,
+            f"{key} count={entry.count} first={entry.first_line} last={entry.last_line} :: {entry.text}",
+            args.max_lines,
+            args.max_bytes,
+        ):
+            break
 
-    prev = None
-    for i in ordered:
-        if prev is not None and i > prev + 1:
-            out.append(f"... omitted {i - prev - 1} lines ...")
-        out.append(f"{i+1:8d}: {lines[i]}")
-        prev = i
+    append_bounded(out, "", args.max_lines, args.max_bytes)
+    append_bounded(out, "=== MATCH FREQUENCY ===", args.max_lines, args.max_bytes)
+    for pattern, count in freq.most_common(20):
+        if not append_bounded(out, f"{count:7d}  {pattern}", args.max_lines, args.max_bytes):
+            break
 
-    result = "\n".join(out) + "\n"
+    if not args.expand:
+        append_bounded(out, "", args.max_lines, args.max_bytes)
+        append_bounded(out, "=== LOG HEAD ===", args.max_lines, args.max_bytes)
+        render_rows(out, head, args.max_lines, args.max_bytes)
+
+    append_bounded(out, "", args.max_lines, args.max_bytes)
+    append_bounded(out, "=== REPRESENTATIVE WINDOWS ===", args.max_lines, args.max_bytes)
+    for key, entry in ranked[: args.max_signatures]:
+        if not append_bounded(out, f"--- signature {key} count={entry.count} ---", args.max_lines, args.max_bytes):
+            break
+        for sample in entry.samples:
+            if not render_rows(out, sample.rows, args.max_lines, args.max_bytes):
+                break
+
+    if not args.expand:
+        append_bounded(out, "", args.max_lines, args.max_bytes)
+        append_bounded(out, "=== LOG TAIL ===", args.max_lines, args.max_bytes)
+        render_rows(out, tail, args.max_lines, args.max_bytes)
+
+    append_bounded(out, "", args.max_lines, args.max_bytes)
+    append_bounded(
+        out,
+        "EXPAND: rerun with --expand <signature-id> only if a specific signature needs more context.",
+        args.max_lines,
+        args.max_bytes,
+    )
+    result = "\n".join(out).rstrip() + "\n"
 
     if args.stdout:
         print(result, end="")
         return 0
-
     output = (args.output or default_output(log)).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(result, encoding="utf-8")
-
     print(f"Focused log: {output}")
-    print(f"Source: {log.stat().st_size} bytes, {len(lines)} lines")
-    print(f"Matches: {len(all_hits)} total, {len(hits)} included")
-    print("Next: inspect the focused artifact first; read raw ranges only if a concrete fact is missing.")
+    print(f"Source: {log.stat().st_size} bytes, {total_lines} lines")
+    print(f"Matches: {matched}; signatures: {len(signatures)}; output: {len(result.encode('utf-8'))} bytes / {len(out)} lines")
     return 0
 
 

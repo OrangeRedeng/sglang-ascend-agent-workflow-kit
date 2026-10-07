@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[[ -n "$ROOT" ]] || { echo 'Not inside a Git worktree.' >&2; exit 2; }
+SCRIPT="$ROOT/.codex/scripts/handoff-status.py"
+[[ -f "$SCRIPT" ]] || { echo "Missing workflow script: $SCRIPT" >&2; exit 2; }
+exec python3 "$SCRIPT" "$@"

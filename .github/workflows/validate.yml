@@ -13,11 +13,31 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Validate shell scripts
-        run: bash -n setup.sh wsl/*.sh bin/cx-task bin/local-task bin/cheap-task bin/strong-task repo/.codex/scripts/*.sh scripts/package-release.sh
+        run: bash -n setup.sh wsl/*.sh bin/cx-task bin/glm-task bin/local-task bin/cheap-task bin/strong-task bin/workflow-handoffs repo/.codex/scripts/*.sh scripts/package-release.sh
       - name: Validate Python
-        run: python3 -m py_compile bin/ai-task bin/workflow-configure codex/hooks/*.py repo/.codex/scripts/*.py scripts/*.py
+        run: python3 -m py_compile bin/ai-task bin/codex-glm bin/workflow-configure bin/workflow-provider-token bin/workflow-skills bin/workflow-exp codex/hooks/*.py repo/.codex/scripts/*.py scripts/*.py
       - name: Validate repository metadata
         run: python3 scripts/validate_repo.py
+      - name: Smoke test safe Codex config merge
+        run: |
+          tmp="$(mktemp -d)"
+          cat > "$tmp/config.toml" <<'EOF'
+          model = "user-model"
+          model_reasoning_effort = "high"
+          [features]
+          memories = true
+          EOF
+          python3 scripts/merge-codex-config.py "$tmp/config.toml"
+          grep -F 'model = "user-model"' "$tmp/config.toml"
+          grep -F 'memories = true' "$tmp/config.toml"
+      - name: Smoke test PostToolUse governor
+        run: |
+          tmp="$(mktemp -d)"
+          cd "$tmp"
+          git init -q
+          mkdir -p .codex-artifacts
+          printf '{"session_id":"test","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"echo ok"},"tool_response":{}}\n' "$tmp" | python3 "$GITHUB_WORKSPACE/codex/hooks/post_tool_budget.py"
+          test -f .codex-artifacts/session-budget/test.json
 
   windows-powershell:
     runs-on: windows-latest

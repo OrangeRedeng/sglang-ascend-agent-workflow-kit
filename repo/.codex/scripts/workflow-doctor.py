@@ -1,404 +1,192 @@
 #!/usr/bin/env python3
-"""Check the local SGLang multi-model workflow installation.
-
-The doctor also reports OpenCode/router configuration without printing API keys.
-It never grants hook trust. When a local Codex binary is available it asks
-Codex itself for `hooks/list`, which exposes each hook's current hash and effective
-trust status. If runtime inspection is unavailable, it falls back to reporting only
-whether a stored trust entry exists and explicitly marks that result as unverified.
-"""
+"""Check the installed SGLang workflow without exposing credentials."""
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
-import select
+import shlex
 import shutil
 import subprocess
 import sys
-import time
-import tomllib
-from typing import Any
-
-EXPECTED_EVENTS = {
-    "session_start": "SessionStart",
-    "user_prompt_submit": "UserPromptSubmit",
-}
+import urllib.error
+import urllib.request
 
 
-def run(cmd: list[str], cwd: Path) -> tuple[int, str]:
+def run(cmd: list[str], cwd: Path, timeout: int = 8):
     try:
-        p = subprocess.run(
-            cmd,
-            cwd=cwd,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=5,
-            check=False,
-        )
+        p = subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False)
         return p.returncode, p.stdout.strip()
     except Exception as exc:
         return 1, str(exc)
 
 
-def git_root(start: Path) -> Path | None:
-    rc, out = run(["git", "rev-parse", "--show-toplevel"], start)
-    return Path(out).resolve() if rc == 0 and out else None
-
-
-def read_marker(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8").strip()
-    except OSError:
-        return ""
-
-
-def stored_hook_trust(config_path: Path, hooks_path: Path) -> dict[str, dict[str, object]]:
-    result: dict[str, dict[str, object]] = {}
-    data: dict[str, Any] = {}
-    try:
-        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    states = data.get("hooks", {}).get("state", {}) if isinstance(data, dict) else {}
-    source = str(hooks_path.resolve())
-    for event in EXPECTED_EVENTS:
-        key = f"{source}:{event}:0:0"
-        state = states.get(key, {}) if isinstance(states, dict) else {}
-        trusted_hash = state.get("trusted_hash", "") if isinstance(state, dict) else ""
-        enabled = not (isinstance(state, dict) and state.get("enabled") is False)
-        result[event] = {
-            "key": key,
-            "stored_trusted_hash": trusted_hash or None,
-            "trust_entry_present": bool(trusted_hash),
-            "enabled_in_stored_state": enabled,
-        }
-    return result
-
-
-
-def external_model_state() -> dict[str, object]:
-    config = Path.home() / ".config" / "sglang-workflow" / "models.env"
-    values: dict[str, str] = {}
-    if config.is_file():
-        for raw in config.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            values[key.strip()] = value.strip().strip('"').strip("'")
-    tiers: dict[str, dict[str, object]] = {}
-    for tier in ("LOCAL", "CHEAP", "STRONG"):
-        base = values.get(f"AI_{tier}_BASE_URL", "")
-        model = values.get(f"AI_{tier}_MODEL", "")
-        tiers[tier.lower()] = {
-            "configured": bool(base and model),
-            "base_url": base or None,
-            "model": model or None,
-        }
-    return {
-        "opencode_available": shutil.which("opencode") is not None,
-        "project_config_exists": False,
-        "models_env_exists": config.is_file(),
-        "models_env_path": str(config),
-        "primary_backend": values.get("AI_PRIMARY_BACKEND", "codex") or "codex",
-        "routing_mode": values.get("AI_ROUTING_MODE", "primary") or "primary",
-        "codex_fallback": values.get("AI_ENABLE_CODEX_FALLBACK", "0").lower() in {"1", "true", "yes", "on"},
-        "tiers": tiers,
-    }
-
-def _send(proc: subprocess.Popen[str], payload: dict[str, object]) -> None:
-    assert proc.stdin is not None
-    proc.stdin.write(json.dumps(payload, separators=(",", ":")) + "\n")
-    proc.stdin.flush()
-
-
-def _read_response(proc: subprocess.Popen[str], request_id: int, timeout: float) -> dict[str, Any]:
-    assert proc.stdout is not None
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        remaining = max(0.0, deadline - time.monotonic())
-        ready, _, _ = select.select([proc.stdout], [], [], remaining)
-        if not ready:
-            break
-        line = proc.stdout.readline()
-        if not line:
-            if proc.poll() is not None:
-                break
+def read_env(path: Path) -> dict[str, str]:
+    data: dict[str, str] = {}
+    if not path.is_file():
+        return data
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
             continue
-        try:
-            message = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if message.get("id") == request_id:
-            return message
-    raise TimeoutError(f"timed out waiting for Codex app-server response id={request_id}")
-
-
-def query_runtime_hooks(root: Path, stored: dict[str, dict[str, object]]) -> dict[str, object]:
-    codex = shutil.which("codex")
-    if not codex:
-        return {"available": False, "error": "codex binary not found", "events": {}}
-
-    proc: subprocess.Popen[str] | None = None
-    try:
-        proc = subprocess.Popen(
-            [codex, "app-server"],
-            cwd=root,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            bufsize=1,
-        )
-        _send(
-            proc,
-            {
-                "method": "initialize",
-                "id": 1,
-                "params": {
-                    "clientInfo": {
-                        "name": "workflow-doctor",
-                        "title": "Workflow Doctor",
-                        "version": read_marker(root / ".codex" / "KIT_VERSION") or "unknown",
-                    }
-                },
-            },
-        )
-        init = _read_response(proc, 1, 8.0)
-        if "error" in init:
-            raise RuntimeError(f"initialize failed: {init['error']}")
-        _send(proc, {"method": "initialized"})
-        _send(proc, {"method": "hooks/list", "id": 2, "params": {"cwds": [str(root)]}})
-        response = _read_response(proc, 2, 8.0)
-        if "error" in response:
-            raise RuntimeError(f"hooks/list failed: {response['error']}")
-
-        result = response.get("result", {})
-        entries = result.get("data", []) if isinstance(result, dict) else []
-        hooks: list[dict[str, Any]] = []
-        for entry in entries if isinstance(entries, list) else []:
-            if not isinstance(entry, dict):
-                continue
-            entry_cwd = Path(str(entry.get("cwd", root))).expanduser()
+        key, value = line.split("=", 1)
+        value = value.strip()
+        if value[:1] in {'"', "'"}:
             try:
-                entry_matches = entry_cwd.resolve() == root
-            except OSError:
-                entry_matches = str(entry_cwd) == str(root)
-            if entry_matches:
-                raw_hooks = entry.get("hooks", [])
-                if isinstance(raw_hooks, list):
-                    hooks.extend(h for h in raw_hooks if isinstance(h, dict))
-
-        events: dict[str, dict[str, object]] = {}
-        for event, expected_name in EXPECTED_EVENTS.items():
-            expected_key = str(stored[event]["key"])
-            hook = next((h for h in hooks if h.get("key") == expected_key), None)
-            if hook is None:
-                hook = next(
-                    (
-                        h for h in hooks
-                        if str(h.get("eventName", "")).lower() == expected_name.lower()
-                        and str(h.get("sourcePath", "")).endswith("/.codex/hooks.json")
-                    ),
-                    None,
-                )
-            if hook is None:
-                events[event] = {
-                    "found": False,
-                    "enabled": False,
-                    "trust_status": "Missing",
-                    "current_hash": None,
-                    "stored_hash_matches_current": False,
-                }
-                continue
-
-            current_hash = hook.get("currentHash") or hook.get("current_hash")
-            trust_status = str(hook.get("trustStatus") or hook.get("trust_status") or "Unknown")
-            enabled = bool(hook.get("enabled", True))
-            stored_hash = stored[event].get("stored_trusted_hash")
-            events[event] = {
-                "found": True,
-                "enabled": enabled,
-                "trust_status": trust_status,
-                "current_hash": current_hash,
-                "stored_hash_matches_current": bool(current_hash and stored_hash == current_hash),
-            }
-        return {"available": True, "error": None, "events": events}
-    except Exception as exc:
-        return {"available": False, "error": str(exc), "events": {}}
-    finally:
-        if proc is not None:
-            try:
-                if proc.stdin:
-                    proc.stdin.close()
-                proc.terminate()
-                proc.wait(timeout=1)
+                value = shlex.split(value)[0]
             except Exception:
+                pass
+        data[key.strip()] = value
+    return data
+
+
+def hook_commands(path: Path) -> list[str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    commands = []
+    for groups in data.get("hooks", {}).values():
+        if not isinstance(groups, list):
+            continue
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            for hook in group.get("hooks", []):
+                if isinstance(hook, dict) and hook.get("command"):
+                    commands.append(str(hook["command"]))
+    return commands
+
+
+def glm_smoke(models: dict[str, str]) -> tuple[bool, str]:
+    base = models.get("AI_GLM_BASE_URL", "").rstrip("/")
+    key = models.get("AI_GLM_API_KEY", "")
+    model = models.get("AI_GLM_MODEL", "glm-5.3")
+    if not base or not key:
+        return False, "GLM endpoint/key is not configured"
+    url = base + "/responses"
+    body = json.dumps({"model": model, "input": "Reply with OK only.", "max_output_tokens": 16}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST", headers={
+        "Authorization": f"Bearer {key}", "Content-Type": "application/json", "User-Agent": "sglang-workflow-doctor/0.3.1",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            raw = response.read(4096)
+            if 200 <= response.status < 300:
                 try:
-                    proc.kill()
+                    parsed = json.loads(raw)
+                    rid = parsed.get("id") or parsed.get("object") or "response"
                 except Exception:
-                    pass
+                    rid = "response"
+                return True, f"HTTP {response.status} ({rid})"
+            return False, f"HTTP {response.status}"
+    except urllib.error.HTTPError as exc:
+        # Never include response body because providers may echo request metadata.
+        return False, f"HTTP {exc.code}"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cwd", type=Path, default=Path.cwd())
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--online", action="store_true", help="perform a small GLM Responses API smoke test when GLM is enabled")
     args = ap.parse_args()
 
-    root = git_root(args.cwd.resolve())
-    if root is None:
+    rc, root_s = run(["git", "rev-parse", "--show-toplevel"], args.cwd.resolve())
+    if rc:
         print("Not inside a Git worktree.", file=sys.stderr)
         return 2
+    root = Path(root_s)
+    home = Path.home()
+    cfgdir = Path(os.environ.get("XDG_CONFIG_HOME", str(home / ".config"))) / "sglang-workflow"
+    models = read_env(cfgdir / "models.env")
+    global_v = (cfgdir / "workflow-kit-version").read_text().strip() if (cfgdir / "workflow-kit-version").is_file() else ""
+    ws_v = (root / ".agents/.workflow-kit-version").read_text().strip() if (root / ".agents/.workflow-kit-version").is_file() else ""
+    ignore_rc, ignore_out = run(["git", "check-ignore", "-v", ".codex-artifacts/"], root)
 
-    codex_home = Path.home() / ".codex"
-    hooks_path = codex_home / "hooks.json"
-    config_path = codex_home / "config.toml"
+    glm_enabled = models.get("AI_GLM_ENABLED", "0").lower() in {"1", "true", "yes", "on"}
+    region = models.get("AI_GLM_REGION", "china")
+    effort_profiles = [home / ".codex" / f"glm-{region}-{effort}.config.toml" for effort in ("low", "high", "max")]
+    external = {}
+    for tier in ("local", "cheap", "strong"):
+        prefix = f"AI_{tier.upper()}_"
+        external[tier] = bool(models.get(prefix + "BASE_URL") and models.get(prefix + "MODEL"))
 
-    global_version = read_marker(Path.home() / ".config" / "sglang-workflow" / "workflow-kit-version")
-    if not global_version:
-        global_version = read_marker(codex_home / "workflow-kit-version")
-    workspace_version = read_marker(root / ".agents" / ".workflow-kit-version")
-    if not workspace_version:
-        workspace_version = read_marker(root / ".codex" / "KIT_VERSION")
+    hook_file = home / ".codex/hooks.json"
+    commands = hook_commands(hook_file)
+    budget_hook = any("post_tool_budget.py" in command for command in commands)
+    session_hook = any("session_start.py" in command for command in commands)
+    prompt_hook = any("prompt_guard.py" in command for command in commands)
 
-    external = external_model_state()
-    primary_backend = str(external.get("primary_backend", "codex"))
-    codex_installed = shutil.which("codex") is not None and config_path.is_file()
-    codex_expected = primary_backend == "codex" or codex_installed
+    state_dir = root / ".codex-artifacts/session-budget"
+    budget_states = len(list(state_dir.glob("*.json"))) if state_dir.is_dir() else 0
+    stale_open = 0
+    handoff_dir = root / ".codex-artifacts/handoffs"
+    if handoff_dir.is_dir():
+        for path in handoff_dir.glob("*.md"):
+            head = path.read_text(encoding="utf-8", errors="replace")[:2000]
+            if "status: open" in head:
+                stale_open += 1
 
-    checks: dict[str, object] = {
+    checks = {
         "root": str(root),
-        "artifact_dir_exists": (root / ".codex-artifacts").is_dir(),
-        "hooks_json_exists": hooks_path.is_file(),
-        "config_exists": config_path.is_file(),
-        "codex_installed": codex_installed,
-        "codex_expected": codex_expected,
-        "versions": {
-            "global": global_version or None,
-            "workspace": workspace_version or None,
-            "in_sync": bool(global_version and workspace_version and global_version == workspace_version),
+        "versions": {"global": global_v or None, "workspace": ws_v or None, "in_sync": bool(global_v and ws_v and global_v == ws_v)},
+        "artifact_dir_git_ignored": ignore_rc == 0,
+        "artifact_ignore_rule": ignore_out if ignore_rc == 0 else "",
+        "codex_available": shutil.which("codex") is not None,
+        "opencode_available": shutil.which("opencode") is not None,
+        "semble_available": shutil.which("semble") is not None,
+        "primary_harness": models.get("AI_PRIMARY_HARNESS", "codex"),
+        "codex_routing": models.get("AI_CODEX_ROUTING", "balanced"),
+        "glm": {
+            "enabled": glm_enabled, "region": region, "model": models.get("AI_GLM_MODEL", "glm-5.3"),
+            "key_present": bool(models.get("AI_GLM_API_KEY")), "catalog_exists": (home / ".codex/models.glm.json").is_file(),
+            "profiles_exist": all(path.is_file() for path in effort_profiles),
         },
+        "external_tiers": external,
+        "skills_lock_exists": (cfgdir / "skills.lock.json").is_file(),
+        "skills_snapshot_exists": (root / ".agents/.skills-resolved.json").is_file(),
+        "skills_index_exists": (root / ".agents/.skills-index.json").is_file(),
+        "hooks": {"file_exists": hook_file.is_file(), "session_start": session_hook, "prompt_guard": prompt_hook, "post_tool_budget": budget_hook},
+        "session_budget_state_files": budget_states,
+        "open_handoff_files": stale_open,
+        "resolver_exists": (root / ".codex/scripts/resolve-handoff.py").is_file(),
+        "review_packet_exists": (root / ".codex/scripts/workflow-review-packet.py").is_file(),
+        "log_reducer_exists": (root / ".codex/scripts/extract-log-context.py").is_file(),
     }
-    external["project_config_exists"] = (root / "opencode.json").is_file()
-    checks["external_models"] = external
 
-    rc, ignored_out = run(["git", "check-ignore", "-v", ".codex-artifacts/"], root)
-    checks["artifact_dir_git_ignored"] = rc == 0
-    checks["artifact_ignore_rule"] = ignored_out if rc == 0 else ""
+    online_ok = True
+    if args.online and glm_enabled:
+        online_ok, detail = glm_smoke(models)
+        checks["glm"]["online_smoke"] = {"ok": online_ok, "detail": detail}
 
-    stored = stored_hook_trust(config_path, hooks_path) if codex_expected else {}
-    checks["hook_trust_stored"] = stored
-    runtime = query_runtime_hooks(root, stored) if codex_expected else {"available": False, "error": "Codex not selected/installed", "events": {}}
-    checks["hook_runtime"] = runtime
-
-    resolver = root / ".codex" / "scripts" / "resolve-handoff.py"
-    if resolver.is_file():
-        rc, out = run([sys.executable, str(resolver), "--cwd", str(root), "--json", "--no-gh"], root)
-        try:
-            checks["handoff_resolver"] = json.loads(out)
-        except Exception:
-            checks["handoff_resolver"] = {"error": out, "exit_code": rc}
-    else:
-        checks["handoff_resolver"] = {"error": "resolver missing"}
+    ok = checks["artifact_dir_git_ignored"] and checks["versions"]["in_sync"] and budget_hook and session_hook and prompt_hook
+    if glm_enabled:
+        ok = ok and checks["codex_available"] and checks["glm"]["key_present"] and checks["glm"]["catalog_exists"] and checks["glm"]["profiles_exist"] and online_ok
 
     if args.json:
-        print(json.dumps(checks, ensure_ascii=False, indent=2))
+        print(json.dumps(checks, indent=2, ensure_ascii=False))
     else:
         print(f"Workflow root: {root}")
-        versions = checks["versions"]
-        version_ok = bool(versions["in_sync"])
-        print(
-            f"[{'OK' if version_ok else 'WARN'}] workflow-kit version: "
-            f"global={versions['global'] or 'unversioned'}, "
-            f"workspace={versions['workspace'] or 'unversioned'}"
-        )
+        print(f"[{'OK' if checks['versions']['in_sync'] else 'WARN'}] workflow-kit version: global={global_v or 'unversioned'} workspace={ws_v or 'unversioned'}")
         print(f"[{'OK' if checks['artifact_dir_git_ignored'] else 'FAIL'}] .codex-artifacts/ is Git-ignored")
-        if codex_expected:
-            print(f"[{'OK' if checks['hooks_json_exists'] else 'FAIL'}] ~/.codex/hooks.json exists")
-            print(f"[{'OK' if checks['config_exists'] else 'FAIL'}] ~/.codex/config.toml exists")
-        else:
-            print("[OK] Codex-specific global config not required for the selected primary backend")
-        external_state = checks["external_models"]
-        assert isinstance(external_state, dict)
-        print(f"Primary backend: {external_state.get('primary_backend')} | routing: {external_state.get('routing_mode')}")
-        external_needed = external_state.get('primary_backend') in {'local', 'cheap', 'strong'} or any(
-            isinstance(v, dict) and v.get('configured') for v in external_state.get('tiers', {}).values()
-        )
-        print(f"[{'OK' if external_state['project_config_exists'] else 'WARN'}] opencode.json exists in worktree")
-        marker = 'OK' if external_state['opencode_available'] else ('FAIL' if external_needed else 'INFO')
-        print(f"[{marker}] OpenCode executable {'available' if external_state['opencode_available'] else 'not installed'}")
-        tiers = external_state.get("tiers", {})
-        assert isinstance(tiers, dict)
-        tier_summary = ", ".join(
-            f"{name}={'configured' if isinstance(state, dict) and state.get('configured') else 'off'}"
-            for name, state in tiers.items()
-        )
-        print(f"External tiers: {tier_summary}")
-        if not external_state.get("models_env_exists"):
-            print(f"[WARN] external model config missing: {external_state['models_env_path']}")
-
-        if codex_expected and runtime["available"]:
-            runtime_events = runtime["events"]
-            assert isinstance(runtime_events, dict)
-            for event in EXPECTED_EVENTS:
-                state = runtime_events.get(event, {})
-                assert isinstance(state, dict)
-                status = str(state.get("trust_status", "Unknown"))
-                status_display = status[:1].upper() + status[1:] if status else "Unknown"
-                enabled = bool(state.get("enabled", False))
-                trusted = status.lower() in {"trusted", "managed"}
-                marker = "OK" if trusted and enabled else "WARN"
-                detail = f"{status_display}, {'enabled' if enabled else 'disabled'}"
-                if status.lower() == "modified":
-                    detail += "; current hook hash differs from the trusted hash"
-                print(f"[{marker}] {event}: {detail}")
-        elif codex_expected:
-            print(f"[WARN] Codex runtime hook inspection unavailable: {runtime['error']}")
-            for event, state in stored.items():
-                stored_status = "stored trust entry present" if state["trust_entry_present"] else "no stored trust entry"
-                enabled = "enabled in stored state" if state["enabled_in_stored_state"] else "disabled in stored state"
-                print(f"[WARN] {event}: {stored_status}, {enabled}; current hash NOT verified")
-            print("       Run /hooks in Codex for authoritative trust status.")
-
-        resolver_state = checks.get("handoff_resolver", {})
-        if isinstance(resolver_state, dict):
-            print(f"Handoff resolver: {resolver_state.get('confidence', 'unknown')} - {resolver_state.get('reason', '')}")
-            for stale in resolver_state.get("stale_candidates", [])[:5]:
-                print(f"  stale: {stale.get('path')} ({', '.join(stale.get('reasons', []))})")
-
-        if codex_expected and runtime["available"]:
-            runtime_events = runtime["events"]
-            assert isinstance(runtime_events, dict)
-            needs_review = any(
-                not (
-                    str(runtime_events.get(event, {}).get("trust_status", "")).lower() in {"trusted", "managed"}
-                    and bool(runtime_events.get(event, {}).get("enabled", False))
-                )
-                for event in EXPECTED_EVENTS
-            )
-            if needs_review:
-                print("\nHook trust is intentionally not changed by this script.")
-                print("Open Codex CLI in this worktree, run /hooks, and approve/enable both SessionStart and UserPromptSubmit.")
-                print("Then reload the VS Code WSL window and start a new Codex session.")
-
-    structural_ok = bool(
-        checks["artifact_dir_git_ignored"]
-        and checks["versions"]["in_sync"]
-        and (not codex_expected or (checks["hooks_json_exists"] and checks["config_exists"]))
-    )
-    runtime_ok = True
-    if codex_expected and runtime["available"]:
-        runtime_events = runtime["events"]
-        assert isinstance(runtime_events, dict)
-        runtime_ok = all(
-            str(runtime_events.get(event, {}).get("trust_status", "")).lower() in {"trusted", "managed"}
-            and bool(runtime_events.get(event, {}).get("enabled", False))
-            for event in EXPECTED_EVENTS
-        )
-    return 0 if structural_ok and runtime_ok else 1
+        print(f"[{'OK' if checks['codex_available'] else 'WARN'}] Codex executable")
+        print(f"[{'OK' if budget_hook else 'FAIL'}] PostToolUse retrieval-budget hook")
+        print(f"[{'OK' if checks['skills_snapshot_exists'] else 'INFO'}] external skill commit snapshot")
+        print(f"[{'OK' if checks['skills_index_exists'] else 'INFO'}] generated skill index")
+        print(f"Session budget state files: {budget_states}; open handoffs: {stale_open}")
+        print(f"Semble: {'installed (optional)' if checks['semble_available'] else 'off (expected for Standard)'}")
+        g = checks["glm"]
+        print(f"GLM: {'enabled' if g['enabled'] else 'off'} region={g['region']} model={g['model']} key={'present' if g['key_present'] else 'missing'} profiles={'OK' if g['profiles_exist'] else 'missing'}")
+        if args.online and glm_enabled:
+            smoke = g["online_smoke"]
+            print(f"[{'OK' if smoke['ok'] else 'FAIL'}] GLM online smoke: {smoke['detail']}")
+        print("External tiers: " + ", ".join(f"{k}={'configured' if v else 'off'}" for k, v in external.items()))
+        print("Hook trust is not changed by workflow-doctor; after hook changes review /hooks in Codex.")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

@@ -1,145 +1,33 @@
 # Ascend / NPU workflow
 
-The repository adds a thin SGLang-specific routing layer over existing SGLang, Ascend, and `torch_npu` skills. The goal is to load the smallest relevant expert workflow instead of putting every NPU rule into every session.
-
-**This is the primary domain workflow of the project.** Multi-model routing, self-hosted backends, and token-cost optimization are subordinate to SGLang + Ascend correctness. Changing the primary model changes only the execution backend; it must not bypass any compatibility baseline, skill-routing rule, profiler collection discipline, benchmark hard stop, or validation requirement below.
-
-## Model-backend invariant
-
-The same Ascend contract applies whether the active agent is Codex, OpenCode with a self-hosted model, or an external API model:
-
-1. establish the real runtime/backend/version/workload baseline before version-sensitive conclusions;
-2. load only the owning SGLang/Ascend/`torch_npu` skill(s);
-3. use the actual Ascend host or CI environment for runtime facts that local WSL cannot establish;
-4. stop rather than infer CUDA/NCCL semantics onto Ascend/HCCL/NPUGraph;
-5. validate the original failing NPU path before claiming a fix or performance result.
+This is the primary domain workflow of the project. Model/provider routing is subordinate to SGLang + Ascend correctness.
 
 ## Compatibility baseline
 
-Before version-sensitive diagnosis or benchmarking, record:
+Before version-sensitive diagnosis or benchmarking record hardware/device generation, NPU count, CANN, PyTorch, `torch_npu`, `sgl-kernel-npu` commit/version, SGLang commit, graph/eager mode, dtype/quantization, TP/DP/EP, HCCL/network settings, model/workload, and actual backend path.
 
-```text
-hardware/device generation
-NPU count
-CANN
-PyTorch
-torch_npu
-sgl-kernel-npu commit/version
-SGLang commit
-graph/eager mode
-dtype / quantization
-TP / DP / EP
-HCCL/network configuration
-model/workload
-actual backend path
-```
-
-Do not upgrade CANN or `torch_npu` merely because a newer release exists. Use the versions required by the branch, CI image, container, or target Ascend host.
+Hard-stop a comparison when any of these differ unexpectedly or a silent fallback changes the path.
 
 ## Core routing
 
-The workspace setup links selected leaf skills into `sglang/.agents/skills/`:
+- `sglang-ascend`: top-level ownership router.
+- `ascend-torch-npu`: torch_npu API/runtime/stream/memory/graph/layout semantics.
+- profiling collection/analysis leaf skills.
+- operator benchmark skill.
+- official NPU adapter, profiling anomaly and HCCL skills.
+- `sglang-ascend-kernel-dev`: kernel/operator implementation router.
+- `sglang-npu-perf-experiment`: controlled multi-round optimization.
 
-```text
-SGLang orchestration/backend dispatch
-  -> sglang-ascend + current SGLang rules
+## CANNBot
 
-torch_npu API/runtime/stream/memory/graph/format semantics
-  -> ascend-torch-npu
+The full profile links curated CANNBot skills when available: `npu-arch`, API best practices/docs search, environment check, tiling design, precision/runtime/crash/sync debugging, code review, direct invoke template, profiling and precision standards.
 
-collect PyTorch/NPU profile
-  -> ascend-pytorch-profiling-collection
+## KernelHive
 
-analyze profile artifacts
-  -> ascend-profiling-analysis
-
-single operator/kernel benchmark
-  -> ascend-npu-op-benchmark
-
-GPU/CUDA -> NPU adaptation review
-  -> official-npu-adapter-reviewer
-
-unexplained profiling anomaly
-  -> official-ascend-profiling-anomaly
-
-HCCL correctness/performance
-  -> official-hccl-test
-```
-
-Do not activate all of them in parallel for one question.
-
-## Optional kernel-specific skills
-
-Only install when a task touches that implementation layer:
-
-```bash
-./wsl/04-install-ascend-kernel-skills-optional.sh opplugin
-./wsl/04-install-ascend-kernel-skills-optional.sh triton
-./wsl/04-install-ascend-kernel-skills-optional.sh ascendc
-```
-
-### op-plugin
-
-Use for custom PyTorch/`torch_npu` operator integration.
-
-### Triton-Ascend
-
-Use when actually editing or profiling Triton-Ascend kernels. Do not load Triton development workflows for ordinary Python NPU backend changes.
-
-### AscendC
-
-Use only when the task enters AscendC/CANN custom operator implementation, tiling, kernel compilation, precision validation, or framework integration.
-
-## Regression workflow
-
-1. Establish good/bad commit, suspect PR, or dependency boundary.
-2. Inspect changed NPU-relevant files first.
-3. Classify ownership: shared SGLang, NPU backend, `torch_npu`, `sgl-kernel-npu`, NPUGraph, HCCL, dependency compatibility, or model adaptation.
-4. Check dependency changes before compensating in application code.
-5. State a concrete root-cause hypothesis before editing.
-6. Make the smallest backend-correct change.
-7. Validate the original failing NPU path first.
-
-CUDA can be a semantic reference where contracts should match, but do not mechanically port CUDA/NCCL/stream/graph/layout assumptions to Ascend/HCCL/NPUGraph.
+The full profile links `ascend-kernel-generator`, `ascend-npu-migration`, and `ascend-doc-update`. `ascend-kernel-optimization` is intentionally excluded from automatic linking until its environment-specific evaluator/output/LLM defaults are adapted locally.
 
 ## Performance workflow
 
-Before every comparison, ensure baseline and candidate match on all variables except the tested change.
+Optimize in the order: redundant work -> synchronization -> allocation/reuse -> graph capture -> existing optimized op -> fusion -> new custom kernel. One round = one hypothesis + one scoped change + correctness + identical benchmark + artifact update. A kernel-local win is not an E2E serving result until the real workload confirms it.
 
-**Hard stop** when any of these differ unexpectedly:
-
-- unrelated Git commits;
-- CANN / PyTorch / `torch_npu`;
-- hardware/NPU count;
-- dtype/quantization;
-- TP/DP/EP;
-- graph/eager state;
-- warmup/run count/workload;
-- attention/backend path;
-- silent fallback.
-
-Preferred optimization order:
-
-```text
-remove redundant work
--> synchronization
--> allocation/memory reuse
--> graph capture
--> existing optimized op
--> fusion
--> new custom kernel
-```
-
-One round = one hypothesis + one scoped patch + correctness + identical benchmark + artifact update.
-
-A microbenchmark win is not an end-to-end SGLang result until the same real serving workload confirms it.
-
-## Profiling
-
-Use the dedicated collection skill before changing profiler flags ad hoc. Analyze generated artifacts with the profiling-analysis skill; use the anomaly skill only when normal analysis does not explain the behavior.
-
-Do not ask several profiler skills to analyze the same artifact in parallel.
-
-## Remote Ascend hosts
-
-Local WSL can remain the development/navigation environment while runtime validation happens on an Ascend server or CI host. Always record the remote environment in `.codex-artifacts/goals/<goal>/environment.md` so local assumptions do not leak into NPU conclusions.
+Never mechanically port CUDA/NCCL/stream/graph/layout assumptions to Ascend/HCCL/NPUGraph.

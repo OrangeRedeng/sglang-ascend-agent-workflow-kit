@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Record and compare structured SGLang/NPU experiment results in a Goal ledger."""
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import subprocess
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def root() -> Path:
+    return Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()).resolve()
+
+
+def goal_dir(name: str) -> Path:
+    p = root() / ".codex-artifacts" / "goals" / name
+    if not p.is_dir():
+        raise SystemExit(f"Goal not found: {p}")
+    return p
+
+
+def read_rows(path: Path) -> list[dict]:
+    rows = []
+    if not path.is_file():
+        return rows
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            rows.append(json.loads(line))
+    return rows
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    rec = sub.add_parser("record")
+    rec.add_argument("goal")
+    rec.add_argument("--id", required=True)
+    rec.add_argument("--baseline-sha", default="")
+    rec.add_argument("--candidate-sha", default="")
+    rec.add_argument("--command", default="")
+    rec.add_argument("--metric", action="append", default=[], help="KEY=VALUE; repeatable")
+    rec.add_argument("--decision", choices=["keep", "reject", "inconclusive"], default="inconclusive")
+    rec.add_argument("--note", default="")
+    show = sub.add_parser("show")
+    show.add_argument("goal")
+    best = sub.add_parser("best")
+    best.add_argument("goal")
+    best.add_argument("--metric", required=True)
+    best.add_argument("--lower-is-better", action="store_true")
+    args = ap.parse_args()
+
+    gd = goal_dir(args.goal)
+    ledger = gd / "results.jsonl"
+    if args.cmd == "record":
+        metrics = {}
+        for item in args.metric:
+            if "=" not in item:
+                raise SystemExit(f"Invalid --metric {item!r}; expected KEY=VALUE")
+            k, v = item.split("=", 1)
+            try:
+                value = float(v)
+            except ValueError:
+                value = v
+            metrics[k] = value
+        row = {
+            "schema": "sglang-npu-experiment/v1", "id": args.id, "recorded_at": now(),
+            "baseline_sha": args.baseline_sha, "candidate_sha": args.candidate_sha,
+            "command": args.command, "metrics": metrics, "decision": args.decision, "note": args.note,
+        }
+        with ledger.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+        print(json.dumps(row, indent=2, ensure_ascii=False))
+        return 0
+
+    rows = read_rows(ledger)
+    if args.cmd == "show":
+        for row in rows:
+            print(json.dumps(row, ensure_ascii=False))
+        return 0
+
+    candidates = []
+    for row in rows:
+        value = row.get("metrics", {}).get(args.metric)
+        if isinstance(value, (int, float)) and row.get("decision") != "reject":
+            candidates.append((float(value), row))
+    if not candidates:
+        raise SystemExit(f"No numeric metric {args.metric!r} in non-rejected rows")
+    value, row = (min(candidates) if args.lower_is_better else max(candidates))
+    print(json.dumps({"metric": args.metric, "value": value, "experiment": row}, indent=2, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

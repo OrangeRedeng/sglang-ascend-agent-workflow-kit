@@ -9,31 +9,19 @@ Contributions should keep the kit small, reproducible, and easy to audit.
 - Keep third-party skills external; link or clone them rather than vendoring unless there is a compelling reason.
 - Keep the default setup usable without an Ascend device; NPU runtime validation belongs on the real target host, CI job, or container.
 - Preserve user-owned existing config where practical; bootstrap scripts should back up or merge rather than silently destroy unrelated settings.
+- Keep Codex/OpenAI as the default daily UI; custom providers must not silently replace the user's native OpenAI provider.
 
 ## Documentation
 
-User-facing docs are intentionally limited to:
-
-- `README.md` - landing page and quick start;
-- `docs/INSTALLATION.md`;
-- `docs/WORKFLOW.md`;
-- `docs/TOOLING.md`;
-- `docs/ASCEND.md`;
-- `docs/TROUBLESHOOTING.md`;
-- `PRINT_RULES.pdf` - one-page printable reference.
-- `docs/AUTOMATION.md` - automation/enforcement contracts for logs, handoffs, and routing;
-- `docs/UPDATING.md` - update an existing installation;
-- `docs/VERSIONING.md` - release and installed-version policy.
-
-Do not create another README-like file unless its topic does not fit an existing document.
+User-facing docs are intentionally limited to the files already present under `docs/`, plus `README.md` and `PRINT_RULES.pdf`.
 
 ## Validation before a pull request
 
 From the repository root:
 
 ```bash
-bash -n wsl/*.sh bin/cx-task repo/.codex/scripts/*.sh
-python3 -m py_compile codex/hooks/*.py repo/.codex/scripts/*.py
+bash -n setup.sh wsl/*.sh bin/cx-task bin/local-task bin/cheap-task bin/strong-task repo/.codex/scripts/*.sh
+python3 -m py_compile bin/ai-task bin/workflow-configure codex/hooks/*.py repo/.codex/scripts/*.py scripts/*.py
 python3 scripts/validate_repo.py
 ```
 
@@ -43,7 +31,7 @@ If `PRINT_RULES.pdf` changes, update `docs/source/PRINT_RULES.md`, rebuild it wi
 
 ## Third-party updates
 
-When changing selected skill names or repositories, verify that the referenced `SKILL.md` paths still exist upstream. Do not assume a historical skill path is still current.
+When changing selected skill names or repositories, verify that the referenced `SKILL.md` paths still exist upstream. Keep `skills.lock.json` synchronized with the source URL, revision policy, and selected skills.
 
 ## Versioning and releases
 
@@ -57,4 +45,4 @@ python3 scripts/validate_repo.py
 ./scripts/package-release.sh
 ```
 
-Tag names use `vX.Y.Z` and must match `VERSION`; CI checks this on tag pushes. Installed copies are tracked separately by the global `~/.codex/workflow-kit-version` marker and the workspace `.codex/KIT_VERSION` marker.
+Tag names use `vX.Y.Z` and must match `VERSION`.

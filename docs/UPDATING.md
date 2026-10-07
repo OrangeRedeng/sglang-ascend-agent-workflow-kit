@@ -1,123 +1,37 @@
-# Updating an existing installation
+# Updating
 
-The updater now reuses the saved installation topology. It does not assume Codex is installed or primary.
-
-## Recommended update
-
-Extract the new release and run inside WSL:
+Normal update:
 
 ```bash
-chmod +x setup.sh wsl/*.sh bin/* repo/.codex/scripts/*
+chmod +x wsl/*.sh scripts/*.sh scripts/*.py repo/.codex/scripts/*
 ./wsl/06-update-existing-workspace.sh
 ```
 
-The update wrapper calls:
+or:
 
 ```bash
 ./setup.sh --update
 ```
 
-## Saved topology
+## Legacy v0.1.x migration
 
-New installations store non-secret deployment state in:
+v0.1.x predates `~/.config/sglang-workflow/install.env`. `wsl/06-update-existing-workspace.sh` detects a recognizable legacy installation and creates a conservative manifest from observable state (Codex, Semble, BBuf/kernel source directories, Serena), then replays the update.
 
-```text
-~/.config/sglang-workflow/install.env
-```
+The migration preserves `.codex-artifacts/`, `models.env`, existing `~/.codex/config.toml`, unrelated hooks and user-owned settings.
 
-The updater reuses:
+## Codex config safety
 
-- installation level;
-- workspace path;
-- selected primary backend;
-- routing mode;
-- installed component flags.
+The updater never copies the repository `codex/config/config.toml` over an existing user file. Kit-managed optional config is merged. The hook merger removes/replaces only hook groups whose command points at kit-owned hook scripts and preserves unrelated hook groups.
 
-It does **not** store or reconstruct API keys there.
+Because the new `PostToolUse` hook has a new definition, use `/hooks` after updating and approve it if Codex reports it as untrusted. Existing unchanged SessionStart/UserPromptSubmit entries should remain structurally stable.
 
-Model credentials/endpoints remain in:
+## Skill updates
 
-```text
-~/.config/sglang-workflow/models.env
-```
-
-That file is preserved.
-
-## Upgrading from a pre-manifest release
-
-If `install.env` does not exist, `setup.sh --update` stops instead of guessing whether Codex or another backend should be installed. Establish the topology once with:
+Normal kit updates reinstall the pinned release revisions. They do not silently advance third-party repositories.
 
 ```bash
-./setup.sh
+workflow-skills status
+workflow-skills update --only awesome-ascend-skills
 ```
 
-or an explicit non-interactive deployment. Subsequent updates replay that saved manifest without changing `models.env`. This is intentional: upgrading an older Codex-only installation must not silently make Codex the primary backend if you want a different architecture.
-
-## Version and downgrade protection
-
-Universal global marker:
-
-```text
-~/.config/sglang-workflow/workflow-kit-version
-```
-
-Workspace skill marker:
-
-```text
-~/code/sglang/.agents/.workflow-kit-version
-```
-
-Full/core workflow installations also keep the compatibility marker:
-
-```text
-~/code/sglang/.codex/KIT_VERSION
-```
-
-Codex installations additionally keep:
-
-```text
-~/.codex/workflow-kit-version
-```
-
-Accidental downgrades are rejected. For an intentional downgrade only:
-
-```bash
-ALLOW_DOWNGRADE=1 ./wsl/06-update-existing-workspace.sh
-```
-
-## What is preserved
-
-The update does not reset the SGLang branch, commit, remotes, worktree, or project code. Existing `.codex-artifacts/` state and `models.env` are preserved. Legacy mutable `.codex/{handoffs,goals,logs}` state is migrated by the workspace helper when applicable.
-
-## After an update
-
-Always inspect routing without calling a model:
-
-```bash
-ai-task --dry-run review 34855
-```
-
-If Codex hooks changed and Codex is installed, approve the new/current hook hashes again:
-
-```text
-cx
-/hooks
-```
-
-Then restart the Codex/VS Code session.
-
-For a non-Codex primary backend, no Codex hook action is required.
-
-## Change installation level or primary backend
-
-An update preserves topology. To intentionally change it, rerun:
-
-```bash
-./setup.sh
-```
-
-or only change model routing with:
-
-```bash
-workflow-configure
-```
+`update --only` intentionally advances the private installed lock and leaves release metadata in this repository unchanged.

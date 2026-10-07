@@ -8,13 +8,12 @@ case "$kind" in
     profile="sglang-lite" ;;
   conflict|conflicts|comments|bug|refactor|dev)
     profile="sglang" ;;
-  review|feature|ascend|npu|cuda|distributed|perf)
+  review|feature|ascend|npu|cuda|distributed|perf|kernel|verify)
     profile="sglang-hard" ;;
   deep|xhigh)
     profile="sglang-xhigh" ;;
   *)
     echo "Unknown task kind: $kind" >&2
-    echo "Kinds: desc metadata docs conflict comments bug refactor review feature ascend npu distributed perf deep" >&2
     exit 2 ;;
 esac
 

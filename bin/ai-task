@@ -1,352 +1,182 @@
 #!/usr/bin/env python3
-"""Provider-neutral task router for the SGLang workflow kit.
+"""Task router for the SGLang + Ascend workflow kit.
 
-The primary backend is user-selectable. Codex is the default only when the user
-chooses it during setup (or keeps the default configuration).
+v0.3 keeps Codex as the preferred harness and separates the Codex provider policy
+(OpenAI vs GLM Coding Plan) from optional OpenCode external worker tiers.
 """
 from __future__ import annotations
-
-import json
-import os
+import json, os, shlex, shutil, subprocess, sys
 from pathlib import Path
-import shlex
-import shutil
-import subprocess
-import sys
 
-CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "sglang-workflow" / "models.env"
-EXTERNAL_TIERS = ("local", "cheap", "strong")
-CODEX_PROFILES = {
-    "codex-lite": "sglang-lite",
-    "codex": "sglang",
-    "codex-hard": "sglang-hard",
-    "codex-xhigh": "sglang-xhigh",
+CONFIG=Path(os.environ.get('XDG_CONFIG_HOME',str(Path.home()/'.config')))/'sglang-workflow'/'models.env'
+EXTERNAL_TIERS=('local','cheap','strong')
+OPENAI_PROFILES={'codex-lite':'sglang-lite','codex':'sglang','codex-hard':'sglang-hard','codex-xhigh':'sglang-xhigh'}
+GLM_TIERS=('glm-low','glm','glm-max')
+KINDS={
+ 'desc','description','metadata','docs','log','logs','search','simple-ci','ci','conflict','conflicts','comments','bug','refactor','dev','review','feature','verify','ascend','npu','cuda','distributed','perf','kernel','deep','xhigh'
 }
-KINDS = {
-    "desc", "description", "metadata", "docs", "log", "logs", "search",
-    "simple-ci", "ci", "conflict", "conflicts", "comments", "bug", "refactor",
-    "dev", "review", "feature", "verify", "ascend", "npu", "cuda",
-    "distributed", "perf", "kernel", "deep", "xhigh",
+HARD_OPENAI={'verify','ascend','npu','cuda','distributed','perf','kernel','deep','xhigh'}
+HYBRID_EXTERNAL={
+ 'desc':['local','cheap','strong'],'description':['local','cheap','strong'],'metadata':['local','cheap','strong'],'docs':['local','cheap','strong'],'log':['local','cheap','strong'],'logs':['local','cheap','strong'],'search':['local','cheap','strong'],'simple-ci':['local','cheap','strong'],
+ 'ci':['cheap','local','strong'],'conflict':['cheap','local','strong'],'conflicts':['cheap','local','strong'],'comments':['cheap','local','strong'],'bug':['cheap','local','strong'],'refactor':['cheap','strong','local'],'dev':['cheap','strong','local'],'review':['strong','cheap','local'],'feature':['strong','cheap','local'],'verify':['strong','local','cheap'],'ascend':['strong','local','cheap'],'npu':['strong','local','cheap'],'cuda':['strong','local','cheap'],'distributed':['strong','local','cheap'],'perf':['strong','local','cheap'],'kernel':['strong','local','cheap'],'deep':['strong','local','cheap'],'xhigh':['strong','local','cheap']
 }
 
-# Used only when AI_ROUTING_MODE=hybrid. This is selection routing, not a
-# multi-stage model chain: the first configured/available backend runs the task.
-HYBRID_EXTERNAL = {
-    "desc": ["local", "cheap", "strong"],
-    "description": ["local", "cheap", "strong"],
-    "metadata": ["local", "cheap", "strong"],
-    "docs": ["local", "cheap", "strong"],
-    "log": ["local", "cheap", "strong"],
-    "logs": ["local", "cheap", "strong"],
-    "search": ["local", "cheap", "strong"],
-    "simple-ci": ["local", "cheap", "strong"],
-    "ci": ["cheap", "local", "strong"],
-    "conflict": ["cheap", "local", "strong"],
-    "conflicts": ["cheap", "local", "strong"],
-    "comments": ["cheap", "local", "strong"],
-    "bug": ["cheap", "local", "strong"],
-    "refactor": ["cheap", "strong", "local"],
-    "dev": ["cheap", "strong", "local"],
-    "review": ["strong", "cheap", "local"],
-    "feature": ["strong", "cheap", "local"],
-    "verify": ["strong", "local", "cheap"],
-    "ascend": ["strong", "local", "cheap"],
-    "npu": ["strong", "local", "cheap"],
-    "cuda": ["strong", "local", "cheap"],
-    "distributed": ["strong", "local", "cheap"],
-    "perf": ["strong", "local", "cheap"],
-    "kernel": ["strong", "local", "cheap"],
-    "deep": ["strong", "local", "cheap"],
-    "xhigh": ["strong", "local", "cheap"],
-}
+def usage():
+    print('Usage: ai-task [--tier auto|primary|local|cheap|strong|glm-low|glm|glm-max|codex-lite|codex|codex-hard|codex-xhigh] [--dry-run] <kind> [request...]',file=sys.stderr)
+    print('Kinds: '+' '.join(sorted(KINDS)),file=sys.stderr)
 
+def load_env_file(path:Path)->None:
+    if not path.is_file(): return
+    exported=set(os.environ); parsed={}
+    for raw in path.read_text(encoding='utf-8').splitlines():
+        line=raw.strip()
+        if not line or line.startswith('#') or '=' not in line: continue
+        k,v=line.split('=',1); k=k.strip(); v=v.strip()
+        if v[:1] in {'"',"'"}:
+            try:v=shlex.split(v)[0]
+            except Exception: pass
+        parsed[k]=v
+    for k,v in parsed.items():
+        if k not in exported: os.environ[k]=v
 
-def usage() -> None:
-    print(
-        "Usage: ai-task [--tier auto|primary|local|cheap|strong|codex-lite|codex|codex-hard|codex-xhigh] "
-        "[--dry-run] <kind> [request...]",
-        file=sys.stderr,
-    )
-    print("Kinds: " + " ".join(sorted(KINDS)), file=sys.stderr)
+def bool_env(name:str,default=False)->bool:
+    raw=os.environ.get(name)
+    return default if raw is None else raw.strip().lower() in {'1','true','yes','on'}
 
-
-def load_env_file(path: Path) -> None:
-    if not path.is_file():
-        return
-    # Preserve real exported environment variables, but inside the file use
-    # normal shell-like last-assignment-wins behavior.
-    exported = set(os.environ)
-    parsed: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if value and value[0:1] in {'"', "'"}:
-            try:
-                value = shlex.split(value)[0]
-            except (ValueError, IndexError):
-                pass
-        parsed[key] = value
-    for key, value in parsed.items():
-        if key not in exported:
-            os.environ[key] = value
-
-
-def primary_backend() -> str:
-    value = os.environ.get("AI_PRIMARY_BACKEND", "codex").strip().lower() or "codex"
-    if value not in {"codex", "local", "cheap", "strong", "none"}:
-        raise SystemExit(f"Invalid AI_PRIMARY_BACKEND={value!r} in {CONFIG}")
+def primary_backend()->str:
+    # v0.3 harness/provider fields take precedence; legacy AI_PRIMARY_BACKEND remains supported.
+    harness=os.environ.get('AI_PRIMARY_HARNESS','').strip().lower()
+    provider=os.environ.get('AI_PRIMARY_PROVIDER','').strip().lower()
+    if harness:
+        if harness=='codex': return 'codex'
+        if harness=='opencode' and provider in EXTERNAL_TIERS: return provider
+        if harness=='none': return 'none'
+        raise SystemExit(f'Invalid AI_PRIMARY_HARNESS={harness!r} / AI_PRIMARY_PROVIDER={provider!r} in {CONFIG}')
+    value=os.environ.get('AI_PRIMARY_BACKEND','codex').strip().lower() or 'codex'
+    if value not in {'codex','local','cheap','strong','none'}: raise SystemExit(f'Invalid AI_PRIMARY_BACKEND={value!r} in {CONFIG}')
     return value
 
-
-def routing_mode() -> str:
-    value = os.environ.get("AI_ROUTING_MODE", "primary").strip().lower() or "primary"
-    if value not in {"primary", "hybrid"}:
-        raise SystemExit(f"Invalid AI_ROUTING_MODE={value!r} in {CONFIG}")
+def routing_mode()->str:
+    value=os.environ.get('AI_ROUTING_MODE','primary').strip().lower() or 'primary'
+    if value not in {'primary','hybrid'}: raise SystemExit(f'Invalid AI_ROUTING_MODE={value!r}')
     return value
 
+def codex_policy()->str:
+    value=os.environ.get('AI_CODEX_ROUTING','balanced').strip().lower() or 'balanced'
+    if value not in {'balanced','openai','glm'}: raise SystemExit(f'Invalid AI_CODEX_ROUTING={value!r}')
+    return value
 
-def bool_env(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+def glm_enabled()->bool:
+    return bool_env('AI_GLM_ENABLED',False) and bool(os.environ.get('AI_GLM_API_KEY','').strip())
 
+def glm_region()->str:
+    region=os.environ.get('AI_GLM_REGION','china').strip().lower() or 'china'
+    if region not in {'china','global'}: raise SystemExit(f'Invalid AI_GLM_REGION={region!r}')
+    return region
 
-def codex_tier_for_kind(kind: str) -> str:
-    if kind in {"desc", "description", "metadata", "docs", "log", "logs", "search"}:
-        return "codex-lite"
-    if kind in {"review", "verify", "ascend", "npu", "cuda", "distributed", "perf", "kernel"}:
-        return "codex-hard"
-    if kind in {"deep", "xhigh"}:
-        return "codex-xhigh"
-    return "codex"
+def openai_tier_for_kind(kind:str)->str:
+    if kind in {'desc','description','metadata','docs','log','logs','search'}: return 'codex-lite'
+    if kind in {'review','verify','ascend','npu','cuda','distributed','perf','kernel'}: return 'codex-hard'
+    if kind in {'deep','xhigh'}: return 'codex-xhigh'
+    return 'codex'
 
+def glm_tier_for_kind(kind:str)->str:
+    if kind in {'desc','description','metadata','docs','log','logs','search','simple-ci'}: return 'glm-low'
+    if kind in {'review','deep','xhigh'}: return 'glm-max'
+    return 'glm'
 
-def tier_settings(tier: str) -> dict[str, object] | None:
-    prefix = f"AI_{tier.upper()}_"
-    base = os.environ.get(prefix + "BASE_URL", "").strip()
-    model = os.environ.get(prefix + "MODEL", "").strip()
-    if not base or not model:
-        return None
-    key = os.environ.get(prefix + "API_KEY", "").strip() or "not-needed"
-    npm = os.environ.get(prefix + "NPM", "").strip() or "@ai-sdk/openai-compatible"
-    provider = os.environ.get(prefix + "PROVIDER_ID", f"kit-{tier}").strip()
-    try:
-        context = int(os.environ.get(prefix + "CONTEXT", "131072"))
-        output = int(os.environ.get(prefix + "OUTPUT", "16384"))
-    except ValueError:
-        raise SystemExit(f"Invalid {prefix}CONTEXT/OUTPUT in {CONFIG}")
-    return {
-        "base": base,
-        "model": model,
-        "key": key,
-        "npm": npm,
-        "provider": provider,
-        "context": context,
-        "output": output,
-    }
+def codex_route(kind:str)->str:
+    policy=codex_policy()
+    if policy=='openai': return openai_tier_for_kind(kind)
+    if policy=='glm': return glm_tier_for_kind(kind) if glm_enabled() else openai_tier_for_kind(kind)
+    if kind in HARD_OPENAI: return openai_tier_for_kind(kind)
+    return glm_tier_for_kind(kind) if glm_enabled() else openai_tier_for_kind(kind)
 
+def tier_settings(tier:str):
+    prefix=f'AI_{tier.upper()}_'; base=os.environ.get(prefix+'BASE_URL','').strip(); model=os.environ.get(prefix+'MODEL','').strip()
+    if not base or not model: return None
+    try: context=int(os.environ.get(prefix+'CONTEXT','131072')); output=int(os.environ.get(prefix+'OUTPUT','16384'))
+    except ValueError: raise SystemExit(f'Invalid {prefix}CONTEXT/OUTPUT')
+    return {'base':base,'model':model,'key':os.environ.get(prefix+'API_KEY','').strip() or 'not-needed','npm':os.environ.get(prefix+'NPM','').strip() or '@ai-sdk/openai-compatible','provider':os.environ.get(prefix+'PROVIDER_ID',f'kit-{tier}').strip(),'context':context,'output':output}
 
-def request_text(kind: str, parts: list[str]) -> str:
-    user = " ".join(parts).strip()
-    if kind == "review" and len(parts) == 1 and parts[0].isdigit():
-        user = f"Review PR #{parts[0]}. Report only."
-    elif not user:
-        user = f"Perform the {kind} task for the current worktree."
-    policy = (
-        f"Workflow task kind: {kind}. Follow AGENTS.override.md and applicable .agents/skills. "
-        "Use targeted Git/rg/Semble retrieval when available; reduce large logs before reading raw content. "
-        "Do not commit or push. Before code-changing work, run .codex/scripts/resolve-handoff.py --json when the workflow layer is installed. "
-        "For report-only review/investigation with actionable local findings, write a compact .codex-artifacts handoff. "
-        "For Ascend/NPU/HCCL/NPUGraph/performance/kernel work, establish the version/runtime/workload baseline required by AGENTS.override.md before drawing conclusions. "
-        "If required semantics cannot be established confidently, stop with a concise uncertainty/escalation note instead of guessing."
-    )
-    return policy + "\n\nUser request: " + user
+def request_text(kind,parts):
+    user=' '.join(parts).strip()
+    if kind=='review' and len(parts)==1 and parts[0].isdigit(): user=f'Review PR #{parts[0]}. Report only.'
+    elif not user: user=f'Perform the {kind} task for the current worktree.'
+    policy=(f'Workflow task kind: {kind}. Follow AGENTS.override.md and applicable .agents/skills. Use targeted Git/rg/Semble retrieval when available; reduce large logs before reading raw content. Do not commit or push. Before code-changing work, run .codex/scripts/resolve-handoff.py --json when installed. For Ascend/NPU/HCCL/NPUGraph/performance/kernel work, establish the version/runtime/workload baseline before drawing conclusions. If required semantics cannot be established confidently, report uncertainty rather than guessing.')
+    return policy+'\n\nUser request: '+user
 
+def build_inline_config(cfg):
+    model=str(cfg['model']); provider=str(cfg['provider'])
+    return json.dumps({'$schema':'https://opencode.ai/config.json','provider':{provider:{'npm':cfg['npm'],'name':f'SGLang workflow {provider}','options':{'baseURL':cfg['base'],'apiKey':'{env:WORKFLOW_MODEL_API_KEY}'},'models':{model:{'name':model,'limit':{'context':cfg['context'],'output':cfg['output']}}}}}},separators=(',',':'))
 
-def build_inline_config(cfg: dict[str, object]) -> str:
-    model = str(cfg["model"])
-    provider = str(cfg["provider"])
-    data = {
-        "$schema": "https://opencode.ai/config.json",
-        "provider": {
-            provider: {
-                "npm": cfg["npm"],
-                "name": f"SGLang workflow {provider}",
-                "options": {"baseURL": cfg["base"], "apiKey": "{env:WORKFLOW_MODEL_API_KEY}"},
-                "models": {
-                    model: {
-                        "name": model,
-                        "limit": {"context": cfg["context"], "output": cfg["output"]},
-                    }
-                },
-            }
-        },
-    }
-    return json.dumps(data, separators=(",", ":"))
+def workflow_consumer():
+    return primary_backend() if primary_backend()!='none' else 'next-agent'
 
+def run_external(tier,kind,parts,dry):
+    cfg=tier_settings(tier)
+    if cfg is None:return 125
+    model_ref=f"{cfg['provider']}/{cfg['model']}"; cmd=['opencode','run','--model',model_ref,'--dir',str(Path.cwd())]
+    if os.environ.get('AI_OPENCODE_AUTO','1').strip().lower() not in {'0','false','no'}: cmd.append('--auto')
+    cmd.append(request_text(kind,parts)); env=os.environ.copy(); env['OPENCODE_CONFIG_CONTENT']=build_inline_config(cfg); env['WORKFLOW_MODEL_API_KEY']=str(cfg['key']); env['WORKFLOW_PRODUCER']=f'opencode:{model_ref}'; env['WORKFLOW_CONSUMER']=workflow_consumer()
+    print(f'ai-task route: {kind} -> {tier} ({model_ref})',file=sys.stderr)
+    if dry: print('DRY RUN:',shlex.join(cmd)); print('provider base:',cfg['base']); return 0
+    if shutil.which('opencode') is None: print('ai-task: OpenCode is not installed; external tier unavailable',file=sys.stderr); return 125
+    return subprocess.run(cmd,env=env).returncode
 
-def workflow_consumer() -> str:
-    primary = primary_backend()
-    return primary if primary != "none" else "next-agent"
+def codex_request(kind,parts):
+    return [f'Review PR #{parts[0]}. Report only.'] if kind=='review' and len(parts)==1 and parts[0].isdigit() else parts
 
+def run_codex(tier,kind,parts,dry):
+    if tier in OPENAI_PROFILES:
+        profile=OPENAI_PROFILES[tier]; provider='openai'
+    else:
+        if not glm_enabled(): return 125
+        effort={'glm-low':'low','glm':'high','glm-max':'max'}[tier]; profile=f'glm-{glm_region()}-{effort}'; provider='glm'
+    cmd=['codex','--profile',profile,*codex_request(kind,parts)]
+    print(f'ai-task route: {kind} -> {tier} ({profile})',file=sys.stderr)
+    if dry: print('DRY RUN:',shlex.join(cmd)); return 0
+    if shutil.which('codex') is None: print('ai-task: Codex CLI is not installed',file=sys.stderr); return 125
+    env=os.environ.copy(); env['WORKFLOW_PRODUCER']=f'codex:{provider}'; env['WORKFLOW_CONSUMER']=workflow_consumer(); return subprocess.run(cmd,env=env).returncode
 
-def run_external(tier: str, kind: str, parts: list[str], dry: bool) -> int:
-    cfg = tier_settings(tier)
-    if cfg is None:
-        return 125
-    model_ref = f"{cfg['provider']}/{cfg['model']}"
-    cmd = ["opencode", "run", "--model", model_ref, "--dir", str(Path.cwd())]
-    attach = os.environ.get("AI_OPENCODE_ATTACH", "").strip()
-    if attach:
-        cmd += ["--attach", attach]
-    if os.environ.get("AI_OPENCODE_AUTO", "1").strip().lower() not in {"0", "false", "no"}:
-        cmd.append("--auto")
-    cmd.append(request_text(kind, parts))
-    env = os.environ.copy()
-    env["OPENCODE_CONFIG_CONTENT"] = build_inline_config(cfg)
-    env["WORKFLOW_MODEL_API_KEY"] = str(cfg["key"])
-    env["WORKFLOW_PRODUCER"] = f"opencode:{model_ref}"
-    env["WORKFLOW_CONSUMER"] = workflow_consumer()
-    print(f"ai-task route: {kind} -> {tier} ({model_ref})", file=sys.stderr)
-    if dry:
-        print("DRY RUN:", shlex.join(cmd))
-        print("provider base:", cfg["base"])
-        return 0
-    if shutil.which("opencode") is None:
-        print("ai-task: OpenCode is not installed; external tier unavailable", file=sys.stderr)
-        return 125
-    return subprocess.run(cmd, env=env).returncode
-
-
-def codex_request(kind: str, parts: list[str]) -> list[str]:
-    if kind == "review" and len(parts) == 1 and parts[0].isdigit():
-        return [f"Review PR #{parts[0]}. Report only."]
-    return parts
-
-
-def run_codex(tier: str, kind: str, parts: list[str], dry: bool) -> int:
-    profile = CODEX_PROFILES[tier]
-    cmd = ["codex", "--profile", profile, *codex_request(kind, parts)]
-    print(f"ai-task route: {kind} -> {tier} ({profile})", file=sys.stderr)
-    if dry:
-        print("DRY RUN:", shlex.join(cmd))
-        return 0
-    if shutil.which("codex") is None:
-        print("ai-task: Codex CLI is not installed", file=sys.stderr)
-        return 125
-    env = os.environ.copy()
-    env["WORKFLOW_PRODUCER"] = "codex"
-    env["WORKFLOW_CONSUMER"] = workflow_consumer()
-    return subprocess.run(cmd, env=env).returncode
-
-
-def dedupe(items: list[str]) -> list[str]:
-    out: list[str] = []
-    for item in items:
-        if item not in out:
-            out.append(item)
+def dedupe(items):
+    out=[]
+    for i in items:
+        if i not in out: out.append(i)
     return out
 
-
-def automatic_route(kind: str) -> list[str]:
-    primary = primary_backend()
-    mode = routing_mode()
-    codex_tier = codex_tier_for_kind(kind)
-
-    if mode == "primary":
-        if primary == "codex":
-            return [codex_tier]
-        if primary in EXTERNAL_TIERS:
-            return [primary]
-        return []
-
-    # Hybrid mode is a task-class selection policy, not semantic verification.
-    # When Codex is the selected primary, correctness-sensitive hardware/review
-    # classes keep the corresponding Codex profile first; low-cost/general work
-    # may use configured external workers first. When another backend is primary,
-    # Codex participates only if explicit fallback was enabled.
-    hard_primary_kinds = {"review", "verify", "ascend", "npu", "cuda", "distributed", "perf", "kernel", "deep", "xhigh"}
-    candidates = list(HYBRID_EXTERNAL[kind])
-    if primary == "codex":
-        if kind in hard_primary_kinds:
-            return dedupe([codex_tier, *candidates])
-        candidates.append(codex_tier)
+def automatic_route(kind):
+    primary=primary_backend(); mode=routing_mode(); selected=codex_route(kind)
+    if mode=='primary': return [selected] if primary=='codex' else ([primary] if primary in EXTERNAL_TIERS else [])
+    candidates=list(HYBRID_EXTERNAL[kind])
+    if primary=='codex':
+        if kind in HARD_OPENAI: return dedupe([selected,*candidates])
+        candidates.append(selected)
     elif primary in EXTERNAL_TIERS:
-        # The user-selected primary is authoritative for correctness-sensitive
-        # SGLang/Ascend work. Hybrid cost routing may choose cheaper workers for
-        # bounded general tasks, but must not silently replace the trusted primary
-        # for NPU/distributed/performance/review verification classes.
-        if kind in hard_primary_kinds:
-            candidates = [primary, *candidates]
-        else:
-            candidates.append(primary)
-        if bool_env("AI_ENABLE_CODEX_FALLBACK", False):
-            candidates.append(codex_tier)
-    elif bool_env("AI_ENABLE_CODEX_FALLBACK", False):
-        candidates.append(codex_tier)
+        candidates=[primary,*candidates] if kind in HARD_OPENAI else [*candidates,primary]
+        if bool_env('AI_ENABLE_CODEX_FALLBACK',False): candidates.append(selected)
+    elif bool_env('AI_ENABLE_CODEX_FALLBACK',False): candidates.append(selected)
     return dedupe(candidates)
 
-
-def main() -> int:
-    load_env_file(CONFIG)
-    args = sys.argv[1:]
-    tier = "auto"
-    dry = False
-    while args and args[0].startswith("--"):
-        if args[0] == "--dry-run":
-            dry = True
-            args = args[1:]
-            continue
-        if args[0] == "--tier" and len(args) >= 2:
-            tier = args[1]
-            args = args[2:]
-            continue
-        if args[0].startswith("--tier="):
-            tier = args[0].split("=", 1)[1]
-            args = args[1:]
-            continue
-        usage()
-        return 2
-    if not args:
-        usage()
-        return 2
-    kind, parts = args[0].lower(), args[1:]
-    if kind not in KINDS:
-        print(f"Unknown task kind: {kind}", file=sys.stderr)
-        usage()
-        return 2
-
-    allowed = {"auto", "primary", *EXTERNAL_TIERS, *CODEX_PROFILES}
-    if tier not in allowed:
-        print(f"Unknown tier: {tier}", file=sys.stderr)
-        return 2
-
-    if tier == "auto":
-        route = automatic_route(kind)
-    elif tier == "primary":
-        primary = primary_backend()
-        route = [codex_tier_for_kind(kind)] if primary == "codex" else ([primary] if primary != "none" else [])
-    else:
-        route = [tier]
-
+def main():
+    load_env_file(CONFIG); args=sys.argv[1:]; tier='auto'; dry=False
+    while args and args[0].startswith('--'):
+        if args[0]=='--dry-run': dry=True; args=args[1:]; continue
+        if args[0]=='--tier' and len(args)>=2: tier=args[1]; args=args[2:]; continue
+        if args[0].startswith('--tier='): tier=args[0].split('=',1)[1]; args=args[1:]; continue
+        usage(); return 2
+    if not args: usage(); return 2
+    kind,parts=args[0].lower(),args[1:]
+    if kind not in KINDS: print(f'Unknown task kind: {kind}',file=sys.stderr); usage(); return 2
+    allowed={'auto','primary',*EXTERNAL_TIERS,*OPENAI_PROFILES,*GLM_TIERS}
+    if tier not in allowed: print(f'Unknown tier: {tier}',file=sys.stderr); return 2
+    if tier=='auto': route=automatic_route(kind)
+    elif tier=='primary':
+        p=primary_backend(); route=[codex_route(kind)] if p=='codex' else ([p] if p!='none' else [])
+    else: route=[tier]
     for selected in route:
-        if selected in CODEX_PROFILES:
-            rc = run_codex(selected, kind, parts, dry)
-        else:
-            rc = run_external(selected, kind, parts, dry)
-        if rc == 125:
-            continue
+        rc=run_codex(selected,kind,parts,dry) if selected in OPENAI_PROFILES or selected in GLM_TIERS else run_external(selected,kind,parts,dry)
+        if rc==125: continue
         return rc
-
-    print("ai-task: no configured backend is available for this route", file=sys.stderr)
-    print(f"Run workflow-configure or edit {CONFIG}.", file=sys.stderr)
-    return 3
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    print('ai-task: no configured backend is available for this route',file=sys.stderr); print(f'Run workflow-configure or edit {CONFIG}.',file=sys.stderr); return 3
+if __name__=='__main__': raise SystemExit(main())

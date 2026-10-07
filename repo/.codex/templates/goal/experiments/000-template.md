@@ -2,14 +2,22 @@
 
 Hypothesis:
 
+Baseline commit/config:
+
+Candidate commit/config:
+
 Scoped change:
 
 Correctness evidence:
 
-Benchmark command:
+Exact benchmark command:
+
+Metrics:
 
 Result:
 
-Decision:
+Decision: keep | reject | inconclusive
 
 Artifacts:
+
+Next experiment:

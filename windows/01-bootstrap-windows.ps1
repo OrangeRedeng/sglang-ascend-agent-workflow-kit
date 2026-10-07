@@ -1,134 +1,25 @@
-#Requires -RunAsAdministrator
-$ErrorActionPreference = "Stop"
-
-
-function Set-Wsl2ConfigOption {
-    param(
-        [System.Collections.Generic.List[string]]$Lines,
-        [string]$Key,
-        [string]$Value
-    )
-
-    $sectionStart = -1
-    $sectionEnd = $Lines.Count
-    for ($i = 0; $i -lt $Lines.Count; $i++) {
-        if ($Lines[$i] -match '^\s*\[wsl2\]\s*$') {
-            $sectionStart = $i
-            continue
-        }
-        if ($sectionStart -ge 0 -and $i -gt $sectionStart -and $Lines[$i] -match '^\s*\[.+\]\s*$') {
-            $sectionEnd = $i
-            break
-        }
-    }
-
-    if ($sectionStart -lt 0) {
-        if ($Lines.Count -gt 0 -and $Lines[$Lines.Count - 1] -ne '') { $Lines.Add('') }
-        $Lines.Add('[wsl2]')
-        $sectionStart = $Lines.Count - 1
-        $sectionEnd = $Lines.Count
-    }
-
-    for ($i = $sectionStart + 1; $i -lt $sectionEnd; $i++) {
-        if ($Lines[$i] -match ('^\s*' + [regex]::Escape($Key) + '\s*=')) {
-            $Lines[$i] = "$Key=$Value"
-            return
-        }
-    }
-
-    $Lines.Insert($sectionEnd, "$Key=$Value")
+$ErrorActionPreference = 'Stop'
+function Ensure-WingetPackage([string]$Id) {
+    $found = winget list --id $Id --exact --accept-source-agreements 2>$null
+    if ($LASTEXITCODE -ne 0) { winget install --id $Id --exact --accept-source-agreements --accept-package-agreements }
 }
-
-function Ensure-WingetPackage {
-    param([string]$Id, [string]$Name)
-    Write-Host "`n==> $Name" -ForegroundColor Cyan
-
-    $installed = winget list --id $Id --exact --accept-source-agreements 2>$null
-    if ($LASTEXITCODE -eq 0 -and ($installed -join "`n") -match [regex]::Escape($Id)) {
-        Write-Host "$Name is already installed; skipping package upgrade." -ForegroundColor Green
-        return
-    }
-
-    winget install --id $Id --exact --accept-package-agreements --accept-source-agreements --silent
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "winget returned $LASTEXITCODE for $Name. Verify manually." -ForegroundColor Yellow
-    }
+function Ensure-VSCodeExtension([string]$Id) {
+    if (-not (Get-Command code -ErrorAction SilentlyContinue)) { return }
+    $installed = code --list-extensions
+    if ($installed -notcontains $Id) { code --install-extension $Id --force }
 }
-
-function Ensure-VSCodeExtension {
-    param([string]$CodeCommand, [string]$ExtensionId)
-    $extensions = & $CodeCommand --list-extensions 2>$null
-    if ($extensions -match "(?i)^$([regex]::Escape($ExtensionId))$") {
-        Write-Host "[OK] VS Code extension: $ExtensionId" -ForegroundColor Green
-        return
-    }
-
-    Write-Host "Installing VS Code extension: $ExtensionId" -ForegroundColor Cyan
-    & $CodeCommand --install-extension $ExtensionId --force
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Could not install $ExtensionId automatically; install it from the VS Code Extensions panel." -ForegroundColor Yellow
-    }
+Ensure-WingetPackage 'Git.Git'
+Ensure-WingetPackage 'Microsoft.VisualStudioCode'
+Ensure-VSCodeExtension 'ms-vscode-remote.remote-wsl'
+Write-Host 'Model-specific VS Code extensions are installed later by setup.sh after the harness is selected.'
+Write-Host 'If WSL is missing, run: wsl --install -d Ubuntu'
+$wslConfig = Join-Path $env:USERPROFILE '.wslconfig'
+if (-not (Test-Path $wslConfig)) {
+@"
+[wsl2]
+dnsTunneling=true
+autoProxy=true
+"@ | Set-Content -Path $wslConfig -Encoding ASCII
+    Write-Host "Created $wslConfig"
 }
-
-if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    throw "winget not found. Install/update Microsoft App Installer first."
-}
-
-Ensure-WingetPackage -Id "Git.Git" -Name "Git for Windows"
-Ensure-WingetPackage -Id "Microsoft.VisualStudioCode" -Name "Visual Studio Code"
-
-# Locate VS Code CLI after install.
-$code = Get-Command code -ErrorAction SilentlyContinue
-if (-not $code) {
-    $candidate = Join-Path $env:LOCALAPPDATA "Programs\Microsoft VS Code\bin\code.cmd"
-    if (Test-Path $candidate) { $code = $candidate }
-}
-
-if ($code) {
-    Write-Host "`n==> VS Code extensions" -ForegroundColor Cyan
-    $codePath = if ($code -is [System.Management.Automation.CommandInfo]) { $code.Source } else { [string]$code }
-    Ensure-VSCodeExtension -CodeCommand $codePath -ExtensionId "ms-vscode-remote.remote-wsl"
-    Write-Host "Model-specific VS Code extensions are installed later by setup.sh after the primary backend is selected." -ForegroundColor DarkGray
-} else {
-    Write-Host "VS Code installed, but 'code' CLI was not found in this PowerShell session." -ForegroundColor Yellow
-    Write-Host "Open VS Code once, then install the ms-vscode-remote.remote-wsl extension." -ForegroundColor Yellow
-}
-
-Write-Host "`n==> WSL2 networking" -ForegroundColor Cyan
-$wslConfigPath = Join-Path $env:USERPROFILE ".wslconfig"
-$configLines = [System.Collections.Generic.List[string]]::new()
-if (Test-Path $wslConfigPath) {
-    foreach ($line in Get-Content $wslConfigPath) { $configLines.Add($line) }
-}
-Set-Wsl2ConfigOption -Lines $configLines -Key "networkingMode" -Value "mirrored"
-Set-Wsl2ConfigOption -Lines $configLines -Key "dnsTunneling" -Value "true"
-Set-Wsl2ConfigOption -Lines $configLines -Key "autoProxy" -Value "true"
-Set-Content -Path $wslConfigPath -Value $configLines -Encoding ascii
-Write-Host "Configured $wslConfigPath with mirrored networking, DNS tunneling, and Windows proxy inheritance." -ForegroundColor Green
-Write-Host "These settings take effect after 'wsl --shutdown' or a Windows reboot." -ForegroundColor Yellow
-
-Write-Host "`n==> WSL2 / Ubuntu" -ForegroundColor Cyan
-$hasUbuntu = $false
-try {
-    $distros = (wsl -l -q 2>$null) -join "`n"
-    if ($distros -match "Ubuntu") { $hasUbuntu = $true }
-} catch {}
-
-if (-not $hasUbuntu) {
-    Write-Host "Ubuntu WSL not detected. Starting installation..." -ForegroundColor Yellow
-    wsl --install -d Ubuntu
-    Write-Host "`nIf Windows requests a reboot, reboot now." -ForegroundColor Yellow
-    Write-Host "After reboot, run: wsl -l -v" -ForegroundColor Cyan
-    Write-Host "If no distribution is installed, run: wsl --install -d Ubuntu" -ForegroundColor Cyan
-    Write-Host "Then run: wsl --shutdown; wsl -d Ubuntu" -ForegroundColor Cyan
-    Write-Host "Create your Linux user, open the extracted kit in WSL, and run ./setup.sh." -ForegroundColor Cyan
-    exit 0
-}
-
-wsl --set-default-version 2
-Write-Host "Ubuntu already exists. Current WSL distributions:" -ForegroundColor Green
-wsl -l -v
-
-Write-Host "`nHost bootstrap complete." -ForegroundColor Green
-Write-Host "Next, in Ubuntu WSL open the extracted kit directory and run: ./setup.sh" -ForegroundColor Cyan
-Write-Host "The setup wizard will choose the installation level and primary model backend, and will install model-specific tooling only when selected." -ForegroundColor Cyan
+Write-Host 'Windows bootstrap complete.'

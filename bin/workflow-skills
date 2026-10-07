@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""Reproducible external skill source manager backed by immutable commit pins."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+
+ROOT = Path(__file__).resolve().parents[1]
+CONFIG_ROOT = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "sglang-workflow"
+LOCK = Path(os.environ.get("WORKFLOW_SKILLS_LOCK", str(CONFIG_ROOT / "skills.lock.json")))
+if not LOCK.is_file():
+    LOCK = ROOT / "skills.lock.json"
+CODE_ROOT = Path(os.environ.get("CODE_ROOT", str(Path.home() / "code")))
+
+
+def run(cmd: list[str], cwd: Path | None = None, check: bool = False) -> tuple[int, str]:
+    p = subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+    if check and p.returncode:
+        raise SystemExit(p.stdout.strip() or f"command failed: {' '.join(cmd)}")
+    return p.returncode, p.stdout.strip()
+
+
+def load() -> dict:
+    return json.loads(LOCK.read_text(encoding="utf-8"))
+
+
+def save(data: dict) -> None:
+    LOCK.parent.mkdir(parents=True, exist_ok=True)
+    LOCK.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def selected_sources(data: dict, only: list[str], include_optional: bool) -> list[tuple[str, dict]]:
+    items = []
+    for name, source in data["sources"].items():
+        if only and name not in only:
+            continue
+        if not only and not include_optional and not source.get("auto_install", False):
+            continue
+        items.append((name, source))
+    missing = sorted(set(only) - {name for name, _ in items})
+    if missing:
+        raise SystemExit("Unknown skill source(s): " + ", ".join(missing))
+    return items
+
+
+def dirty(dest: Path) -> bool:
+    return bool(run(["git", "status", "--porcelain"], dest)[1])
+
+
+def resolve_pin(dest: Path, pin: str) -> str:
+    rc, out = run(["git", "rev-parse", f"{pin}^{{commit}}"], dest)
+    if rc:
+        raise SystemExit(f"Pinned commit {pin} is not available in {dest}. Fetch the source or run workflow-skills update explicitly.")
+    return out.splitlines()[-1].strip()
+
+
+def validate_skills(name: str, source: dict, dest: Path) -> list[str]:
+    missing = []
+    for skill in source.get("selected_skills", []):
+        matches = list(dest.rglob(f"{skill}/SKILL.md"))
+        if not matches:
+            missing.append(skill)
+    if missing:
+        raise SystemExit(f"{name}: pinned source is missing selected skills: {', '.join(missing)}")
+    return missing
+
+
+def ensure_clone(name: str, source: dict, update_branch: bool = False) -> str:
+    dest = CODE_ROOT / source["directory"]
+    url = source["url"]
+    pin = source["commit"]
+    branch = source.get("branch", "")
+    if not (dest / ".git").is_dir():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        run(["git", "clone", url, str(dest)], check=True)
+    if dirty(dest):
+        raise SystemExit(f"Refusing to change dirty skill source: {name} ({dest})")
+    run(["git", "remote", "set-url", "origin", url], dest, check=True)
+    if update_branch:
+        if not branch:
+            raise SystemExit(f"{name}: no branch metadata for update")
+        run(["git", "fetch", "--prune", "origin", branch], dest, check=True)
+        _, full = run(["git", "rev-parse", f"origin/{branch}^{{commit}}"], dest, check=True)
+        source["commit"] = full.strip()
+        pin = source["commit"]
+    else:
+        # Full clone normally already contains the pin. Fetch it explicitly when the server accepts SHA fetches.
+        rc, _ = run(["git", "cat-file", "-e", f"{pin}^{{commit}}"], dest)
+        if rc:
+            run(["git", "fetch", "origin", branch or pin], dest, check=True)
+    full = resolve_pin(dest, pin)
+    run(["git", "checkout", "--detach", full], dest, check=True)
+    validate_skills(name, source, dest)
+    return full
+
+
+def status(data: dict, only: list[str]) -> int:
+    bad = 0
+    for name, source in selected_sources(data, only, True):
+        dest = CODE_ROOT / source["directory"]
+        pin = str(source["commit"])
+        if not (dest / ".git").is_dir():
+            print(f"{name:24} MISSING expected={pin} {dest}")
+            bad += 1
+            continue
+        _, head = run(["git", "rev-parse", "HEAD"], dest)
+        is_dirty = dirty(dest)
+        match = bool(head and head.startswith(pin)) or bool(pin and pin.startswith(head))
+        label = "MATCH" if match else "DRIFT"
+        if not match:
+            bad += 1
+        print(f"{name:24} {label:5} head={head[:12]:12} expected={pin[:12]:12} {'DIRTY' if is_dirty else 'clean'}")
+    return bad
+
+
+def install(data: dict, only: list[str], include_optional: bool) -> int:
+    for name, source in selected_sources(data, only, include_optional):
+        full = ensure_clone(name, source, False)
+        print(f"pinned: {name} -> {full}")
+    return status(data, only)
+
+
+def update(data: dict, only: list[str]) -> int:
+    targets = selected_sources(data, only, True)
+    if not only:
+        raise SystemExit("workflow-skills update requires at least one --only SOURCE; advancing every source must be explicit")
+    for name, source in targets:
+        full = ensure_clone(name, source, True)
+        source["commit"] = full
+        source.pop("pin_kind", None)
+        print(f"advanced private lock: {name} -> {full}")
+    save(data)
+    return status(data, only)
+
+
+def snapshot(data: dict) -> int:
+    state = {"schema": "sglang-workflow-skills-state/v2", "lock": str(LOCK), "sources": {}}
+    for name, source in data["sources"].items():
+        dest = CODE_ROOT / source["directory"]
+        head = run(["git", "rev-parse", "HEAD"], dest)[1] if (dest / ".git").is_dir() else ""
+        state["sources"][name] = {
+            "url": source["url"], "branch": source.get("branch"), "expected_commit": source.get("commit"),
+            "resolved_commit": head or None, "directory": str(dest), "selected_skills": source.get("selected_skills", []),
+        }
+    out = Path(os.environ.get("SGLANG", str(CODE_ROOT / "sglang"))) / ".agents" / ".skills-resolved.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(out)
+    return 0
+
+
+def index(data: dict) -> int:
+    entries = []
+    for name, source in data["sources"].items():
+        dest = CODE_ROOT / source["directory"]
+        if not dest.is_dir():
+            continue
+        for skill in source.get("selected_skills", []):
+            matches = list(dest.rglob(f"{skill}/SKILL.md"))
+            if not matches:
+                continue
+            p = matches[0]
+            text = p.read_text(encoding="utf-8", errors="replace")
+            title = next((line.lstrip("# ").strip() for line in text.splitlines() if line.startswith("#")), skill)
+            description = next((line.strip() for line in text.splitlines() if line.strip() and not line.startswith("#") and not line.startswith("---")), "")[:300]
+            entries.append({"name": skill, "source": name, "path": str(p), "title": title, "description": description})
+    out = Path(os.environ.get("SGLANG", str(CODE_ROOT / "sglang"))) / ".agents" / ".skills-index.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({"schema": "sglang-workflow-skill-index/v1", "skills": entries}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(out)
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("command", choices=["status", "install", "update", "snapshot", "index"])
+    ap.add_argument("--only", action="append", default=[], metavar="SOURCE")
+    ap.add_argument("--include-optional", action="store_true")
+    args = ap.parse_args()
+    data = load()
+    if args.command == "status":
+        return status(data, args.only)
+    if args.command == "install":
+        return install(data, args.only, args.include_optional)
+    if args.command == "update":
+        return update(data, args.only)
+    if args.command == "snapshot":
+        return snapshot(data)
+    return index(data)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

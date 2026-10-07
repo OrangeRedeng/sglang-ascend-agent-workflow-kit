@@ -1,5 +1,5 @@
 {
-  "description": "Session lifecycle guard: auto-discover handoffs and block high-cost trivial push prompts.",
+  "description": "SGLang Ascend workflow: handoff discovery, prompt guard, and measured session retrieval budget.",
   "hooks": {
     "SessionStart": [
       {
@@ -21,6 +21,19 @@
             "command": "python3 \"$HOME/.codex/hooks/prompt_guard.py\"",
             "timeout": 8,
             "statusMessage": "Checking prompt workflow"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.codex/hooks/post_tool_budget.py\"",
+            "timeout": 5,
+            "statusMessage": "Tracking retrieval budget"
           }
         ]
       }

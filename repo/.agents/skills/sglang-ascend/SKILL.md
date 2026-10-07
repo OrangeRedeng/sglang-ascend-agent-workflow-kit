@@ -6,27 +6,10 @@ description: Route SGLang Ascend NPU work to the correct SGLang, torch_npu, prof
 
 Use for `hardware_backend/npu`, `torch_npu`, HCCL, NPUGraph, Ascend attention, NPU quantization/LoRA, `sgl-kernel-npu`, NPU CI/model support.
 
-## First: capture the compatibility baseline
+Before version-sensitive diagnosis record hardware/device, CANN, torch, torch_npu, sgl-kernel-npu version/commit, SGLang commit, eager/graph mode, dtype/quantization, TP/DP/EP/HCCL and exact workload/backend path.
 
-For version-sensitive diagnosis record hardware/device, CANN, torch, torch_npu, sgl-kernel-npu version/commit, SGLang commit, eager/graph mode, dtype/quantization, TP/DP/EP/HCCL and exact workload/backend path.
+Route by ownership: SGLang orchestration -> SGLang rules; torch_npu semantics -> `ascend-torch-npu`; profiles -> profiling skills; single-op benchmark -> `ascend-npu-op-benchmark`; adaptation -> `official-npu-adapter-reviewer`; profiling anomaly -> `official-ascend-profiling-anomaly`; HCCL -> `official-hccl-test`; custom PyTorch op -> `ascend-opplugin`; Triton/AscendC -> corresponding leaf skill; optimized SGLang kernel -> inspect `sgl-kernel-npu` first.
 
-Use the versions pinned by the target branch/container/CI. Do not upgrade dependencies just because a newer release exists.
+For new or optimized NPU kernels, prefer the bundled `sglang-ascend-kernel-dev` orchestration skill, then load only the selected CANNBot/KernelHive leaf skill.
 
-## Then route by ownership
-
-- SGLang orchestration / backend dispatch -> SGLang code + relevant upstream `.claude` rule/skill.
-- `torch_npu` API, memory, streams/events, graph, formats or framework contract -> `ascend-torch-npu` if installed.
-- collect PyTorch/NPU profiling -> `ascend-pytorch-profiling-collection` if installed.
-- analyze profiling artifacts -> `ascend-profiling-analysis` if installed.
-- single-op benchmark -> `ascend-npu-op-benchmark` if installed.
-- GPU/CUDA -> NPU adaptation review -> `official-npu-adapter-reviewer` if installed.
-- unexplained NPU profiling anomaly -> `official-ascend-profiling-anomaly` if installed.
-- HCCL communication validation/performance -> `official-hccl-test` if installed.
-- custom PyTorch operator integration -> optional `ascend-opplugin` skill if installed.
-- Triton-Ascend kernel work -> optional Triton skill only for the current task.
-- AscendC kernel work -> optional AscendC skill only for the current task.
-- optimized SGLang custom kernel implementation -> inspect `sgl-kernel-npu` before changing generic SGLang code.
-
-Do not load every NPU skill at once. Use the smallest leaf skill that owns the question.
-
-Do not mechanically translate CUDA/NCCL/graph/stream/layout/dtype assumptions to Ascend/HCCL/NPUGraph. Prefer backend-local changes and preserve other backends.
+Do not load every NPU skill at once. Do not mechanically translate CUDA/NCCL/graph/stream/layout/dtype assumptions to Ascend/HCCL/NPUGraph.

@@ -1,0 +1,58 @@
+{
+  "schema": "sglang-ascend-skill-sources/v2",
+  "generated_at": "2026-10-07",
+  "notes": "Install uses immutable commit pins. workflow-skills update intentionally advances the private installed lock; repository releases remain reproducible.",
+  "sources": {
+    "awesome-ascend-skills": {
+      "url": "https://github.com/ascend-ai-coding/awesome-ascend-skills.git",
+      "branch": "main",
+      "commit": "62a4ecbb198a7bef51e04d5278cad484a5545219",
+      "directory": "awesome-ascend-skills",
+      "auto_install": true,
+      "tier": "core",
+      "license": "upstream",
+      "selected_skills": ["torch_npu", "profiling-analysis", "pytorch-profiling-collection", "npu-op-benchmark", "ascend-opplugin", "triton-ascend-migration", "ascendc"]
+    },
+    "ascend-agent-skills": {
+      "url": "https://github.com/Ascend/agent-skills.git",
+      "branch": "master",
+      "commit": "155ac37bd169ddb89479af528297cfb2237400aa",
+      "directory": "ascend-agent-skills",
+      "auto_install": true,
+      "tier": "core",
+      "license": "MulanPSL-2.0",
+      "selected_skills": ["npu-adapter-reviewer", "ascend-profiling-anomaly", "hccl-test", "triton-operator-env-config", "triton-operator-code-review", "triton-operator-precision-eval", "triton-operator-performance-eval", "triton-operator-performance-optim", "ascendc-operator-design", "ascendc-operator-compile-debug", "ascendc-operator-frame-adapter-torch", "ascendc-operator-precision-eval"]
+    },
+    "cannbot-skills": {
+      "url": "https://gitcode.com/cann/cannbot-skills.git",
+      "branch": "master",
+      "commit": "30cca3ba",
+      "pin_kind": "abbreviated-immutable-commit",
+      "directory": "cannbot-skills",
+      "auto_install": false,
+      "tier": "kernel",
+      "license": "upstream",
+      "selected_skills": ["npu-arch", "ascendc-api-best-practices", "ascendc-docs-search", "ascendc-env-check", "ascendc-tiling-design", "ascendc-precision-debug", "ascendc-runtime-debug", "ascendc-crash-debug", "ascendc-sync-audit", "ascendc-code-review", "ascendc-direct-invoke-template", "ops-profiling", "ops-precision-standard"]
+    },
+    "kernelhive-ascendc": {
+      "url": "https://github.com/KernelHive/ascendc-skill.git",
+      "branch": "main",
+      "commit": "c78f267d0423d59a51a02070e5bb845fde2dbd69",
+      "directory": "kernelhive-ascendc-skill",
+      "auto_install": false,
+      "tier": "experimental",
+      "license": "upstream",
+      "selected_skills": ["ascend-kernel-generator", "ascend-npu-migration", "ascend-doc-update"]
+    },
+    "bbuf": {
+      "url": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS.git",
+      "branch": "main",
+      "commit": "6dc9c66a008daded66f214022919ff88b2186252",
+      "directory": "AI-Infra-Auto-Driven-SKILLS",
+      "auto_install": false,
+      "tier": "extended",
+      "license": "upstream",
+      "selected_skills": ["sglang-humanize-review", "model-pr-optimization-history", "llm-torch-profiler-analysis", "llm-pipeline-analysis", "sglang-prod-incident-triage"]
+    }
+  }
+}

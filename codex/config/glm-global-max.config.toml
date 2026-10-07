@@ -1,0 +1,18 @@
+model_provider = "zai_glm_global"
+model = "glm-5.3"
+model_reasoning_effort = "max"
+model_reasoning_summary = "none"
+model_catalog_json = "~/.codex/models.glm.json"
+
+[model_providers.zai_glm_global]
+name = "Z.AI GLM Coding Plan"
+base_url = "https://api.z.ai/api/v1"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = false
+
+[model_providers.zai_glm_global.auth]
+command = "__TOKEN_HELPER__"
+args = ["glm"]
+timeout_ms = 5000
+refresh_interval_ms = 300000

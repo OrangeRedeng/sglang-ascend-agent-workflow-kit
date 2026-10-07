@@ -3,325 +3,171 @@ from __future__ import annotations
 
 import json
 import os
-import pathlib
+from pathlib import Path
 import re
 import sys
 import tomllib
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1]
 errors: list[str] = []
 
 
 def require(path: str) -> None:
-    p = ROOT / path
-    if not p.exists():
-        errors.append(f"missing required path: {path}")
+    if not (ROOT / path).exists():
+        errors.append(f"missing: {path}")
 
 
-for path in [
-    "README.md",
-    ".github/workflows/validate.yml",
-    "VERSION",
-    "CHANGELOG.md",
-    "docs/VERSIONING.md",
-    "scripts/kit-version.py",
-    "scripts/package-release.sh",
-    "PRINT_RULES.pdf",
-    "LICENSE",
-    "ACKNOWLEDGEMENTS.md",
-    "CONTRIBUTING.md",
-    "docs/INSTALLATION.md",
-    "docs/VSCODE.md",
-    "docs/AUTOMATION.md",
-    "docs/WORKFLOW.md",
-    "docs/TOOLING.md",
-    "docs/MULTI_MODEL.md",
-    "docs/MODELS.md",
-    "setup.sh",
-    "docs/ASCEND.md",
-    "docs/TROUBLESHOOTING.md",
-    "codex/config/config.toml",
-    "codex/hooks.json",
-    "opencode/opencode.json",
-    "opencode/opencode.minimal.json",
-    "opencode/models.env.example",
-    "bin/cx-task",
-    "bin/ai-task",
-    "bin/local-task",
-    "bin/cheap-task",
-    "bin/strong-task",
-    "bin/workflow-configure",
-    "windows/00-preflight.ps1",
-    "windows/01-bootstrap-windows.ps1",
-    "wsl/02-bootstrap-wsl.sh",
-    "wsl/03-setup-sglang-workspace.sh",
-    "scripts/build_print_rules.py",
-    "repo/.codex/scripts/extract-log-context.py",
-    "repo/.codex/scripts/new-handoff.sh",
-    "repo/.codex/templates/handoff.md",
-    "repo/.codex/templates/goal/goal.md",
-    "repo/.codex/scripts/resolve-handoff.py",
-    "repo/.codex/scripts/handoff-status.py",
-    "repo/.codex/scripts/migrate-artifacts.py",
-    "repo/.codex/scripts/workflow-doctor.py",
-    "codex/hooks/session_start.py",
-    "wsl/06-update-existing-workspace.sh",
-    "docs/UPDATING.md",
-]:
+required = [
+    "README.md", "VERSION", "CHANGELOG.md", "skills.lock.json", "setup.sh", ".github/workflows/validate.yml",
+    "docs/INSTALLATION.md", "docs/VSCODE.md", "docs/MULTI_MODEL.md", "docs/MODELS.md", "docs/ASCEND.md", "docs/SKILLS.md",
+    "docs/WORKFLOW.md", "docs/TOOLING.md", "docs/AUTOMATION.md", "docs/TROUBLESHOOTING.md", "docs/UPDATING.md", "docs/VERSIONING.md",
+    "PRINT_RULES.pdf", "bin/ai-task", "bin/codex-glm", "bin/glm-task", "bin/workflow-configure", "bin/workflow-provider-token",
+    "bin/workflow-skills", "bin/workflow-handoffs", "bin/workflow-exp", "codex/config/config.toml", "codex/models.glm.json", "codex/hooks.json",
+    "codex/hooks/post_tool_budget.py", "scripts/merge-codex-config.py", "scripts/merge-codex-hooks.py", "opencode/models.env.example",
+    "wsl/02-bootstrap-wsl.sh", "wsl/03-setup-sglang-workspace.sh", "wsl/04-install-ascend-kernel-skills-optional.sh", "wsl/06-update-existing-workspace.sh",
+    "repo/AGENTS.override.md", "repo/.agents/skills/sglang-ascend-kernel-dev/SKILL.md", "repo/.agents/skills/sglang-npu-perf-experiment/SKILL.md",
+    "repo/.codex/scripts/workflow-doctor.py", "repo/.codex/scripts/workflow-review-packet.py", "repo/.codex/scripts/extract-log-context.py",
+    "repo/.codex/scripts/handoff-status.py", "repo/.codex/scripts/new-goal.sh",
+]
+for path in required:
     require(path)
 
 try:
-    with (ROOT / "codex/hooks.json").open(encoding="utf-8") as f:
-        json.load(f)
+    version = (ROOT / "VERSION").read_text().strip()
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", version):
+        errors.append(f"invalid VERSION: {version}")
+    if f"**Current release:** `v{version}`" not in (ROOT / "README.md").read_text():
+        errors.append("README release mismatch")
+    if not re.search(rf"^## \[{re.escape(version)}\]", (ROOT / "CHANGELOG.md").read_text(), re.M):
+        errors.append("CHANGELOG release mismatch")
 except Exception as exc:
-    errors.append(f"invalid codex/hooks.json: {exc}")
+    errors.append(f"version: {exc}")
 
-try:
-    with (ROOT / "opencode/opencode.json").open(encoding="utf-8") as f:
-        opencode_config = json.load(f)
-    if "AGENTS.override.md" not in opencode_config.get("instructions", []):
-        errors.append("opencode/opencode.json must load AGENTS.override.md")
-    if "semble" not in opencode_config.get("mcp", {}):
-        errors.append("opencode/opencode.json must configure Semble MCP")
-except Exception as exc:
-    errors.append(f"invalid opencode/opencode.json: {exc}")
-
-for executable in ["setup.sh", "bin/cx-task", "bin/ai-task", "bin/local-task", "bin/cheap-task", "bin/strong-task", "bin/workflow-configure"]:
-    path = ROOT / executable
-    if path.exists() and not os.access(path, os.X_OK):
-        errors.append(f"router is not executable: {executable}")
-
-for p in sorted((ROOT / "codex/config").glob("*.toml")):
+for path in (ROOT / "codex/config").glob("*.toml"):
     try:
-        with p.open("rb") as f:
-            tomllib.load(f)
+        tomllib.loads(path.read_text())
     except Exception as exc:
-        errors.append(f"invalid TOML {p.relative_to(ROOT)}: {exc}")
+        errors.append(f"invalid TOML {path.relative_to(ROOT)}: {exc}")
 
-main_config = ROOT / "codex/config/config.toml"
-if main_config.exists():
-    text = main_config.read_text(encoding="utf-8")
-    if "startup_timeout_sec = 120" not in text:
-        errors.append("Semble startup timeout must be 120 seconds in codex/config/config.toml")
-
-
-# Version contract: root VERSION is SemVer, CHANGELOG contains it, and a pushed vX.Y.Z tag matches it.
-version = ""
 try:
-    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", version):
-        errors.append(f"VERSION is not SemVer: {version!r}")
-    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    if not re.search(rf"^## \[{re.escape(version)}\]", changelog, re.M):
-        errors.append(f"CHANGELOG.md has no release heading for VERSION {version}")
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    if f"**Current release:** `v{version}`" not in readme:
-        errors.append(f"README current release does not match VERSION v{version}")
+    base = tomllib.loads((ROOT / "codex/config/config.toml").read_text())
+    for forbidden in ("model", "model_provider", "model_catalog_json"):
+        if forbidden in base:
+            errors.append(f"default Codex config must not own user {forbidden}")
+except Exception:
+    pass
+
+for region, url in {"china": "https://open.bigmodel.cn/api/v1", "global": "https://api.z.ai/api/v1"}.items():
+    for effort in ("low", "high", "max"):
+        path = ROOT / f"codex/config/glm-{region}-{effort}.config.toml"
+        require(str(path.relative_to(ROOT)))
+        if path.exists():
+            data = tomllib.loads(path.read_text())
+            text = path.read_text()
+            if data.get("model") != "glm-5.3":
+                errors.append(f"{path.name}: model")
+            if data.get("model_reasoning_effort") != effort:
+                errors.append(f"{path.name}: effort")
+            if url not in text or 'wire_api = "responses"' not in text:
+                errors.append(f"{path.name}: endpoint/wire API")
+            if "AI_GLM_API_KEY" in text or "experimental_bearer_token" in text:
+                errors.append(f"{path.name}: secret must not be embedded")
+
+try:
+    models = json.loads((ROOT / "codex/models.glm.json").read_text())
+    model = models["models"][0]
+    if model["slug"] != "glm-5.3" or model["context_window"] != 1048576:
+        errors.append("invalid GLM model catalog")
 except Exception as exc:
-    errors.append(f"version metadata error: {exc}")
+    errors.append(f"GLM catalog: {exc}")
 
-if os.environ.get("GITHUB_REF_TYPE") == "tag":
-    tag = os.environ.get("GITHUB_REF_NAME", "")
-    if tag.startswith("v") and version and tag != f"v{version}":
-        errors.append(f"Git tag {tag} does not match VERSION v{version}")
+try:
+    hooks = json.loads((ROOT / "codex/hooks.json").read_text())
+    if "PostToolUse" not in hooks.get("hooks", {}):
+        errors.append("codex/hooks.json missing PostToolUse governor")
+except Exception as exc:
+    errors.append(f"hooks JSON: {exc}")
 
+try:
+    lock = json.loads((ROOT / "skills.lock.json").read_text())
+    if lock.get("schema") != "sglang-ascend-skill-sources/v2":
+        errors.append("skills.lock schema must be v2")
+    sources = lock["sources"]
+    for name in ("cannbot-skills", "kernelhive-ascendc", "awesome-ascend-skills", "ascend-agent-skills"):
+        source = sources.get(name)
+        if not source:
+            errors.append(f"skills.lock missing {name}")
+            continue
+        pin = str(source.get("commit", ""))
+        if not re.fullmatch(r"[0-9a-f]{8,40}", pin):
+            errors.append(f"skills.lock {name} is not pinned to immutable commit: {pin!r}")
+        if not source.get("selected_skills"):
+            errors.append(f"skills.lock {name} has no selected_skills")
+        if source.get("commit") in {"main", "master", "HEAD"}:
+            errors.append(f"skills.lock {name} uses floating ref")
+except Exception as exc:
+    errors.append(f"skills.lock: {exc}")
+
+executables = [
+    "setup.sh", "bin/ai-task", "bin/codex-glm", "bin/glm-task", "bin/workflow-configure", "bin/workflow-provider-token",
+    "bin/workflow-skills", "bin/workflow-handoffs", "bin/workflow-exp", "wsl/02-bootstrap-wsl.sh", "wsl/03-setup-sglang-workspace.sh",
+    "wsl/04-install-ascend-kernel-skills-optional.sh", "wsl/06-update-existing-workspace.sh", "scripts/merge-codex-config.py", "scripts/merge-codex-hooks.py",
+    "codex/hooks/post_tool_budget.py", "repo/.codex/scripts/workflow-review-packet.py", "repo/.codex/scripts/extract-log-context.py",
+]
+for path in executables:
+    if (ROOT / path).exists() and not os.access(ROOT / path, os.X_OK):
+        errors.append(f"not executable: {path}")
 
 contracts = {
+    "wsl/02-bootstrap-wsl.sh": [
+        "merge-codex-config.py", "merge-codex-hooks.py", "codex/hooks/*.py", "workflow-handoffs", "workflow-exp",
+    ],
+    "setup.sh": [
+        "Standard - Codex-first workflow + core Ascend skills (Semble/Serena optional)", "INSTALL_SEMBLE=0", "INSTALL_GLM",
+    ],
+    "codex/hooks/post_tool_budget.py": [
+        "SOFT_DEFAULT = 32", "CHECKPOINT_DEFAULT = 44", "systemMessage", "session-budget", "file_identity",
+    ],
+    "repo/.codex/scripts/extract-log-context.py": [
+        "default=32768", "default=400", "--expand", "UNIQUE_SIGNATURES", "normalize_signature",
+    ],
+    "repo/.codex/scripts/workflow-review-packet.py": [
+        "DEFAULT_MAX_BYTES = 98304", "--unified=", ".codex-artifacts", "reviews",
+    ],
+    "repo/.codex/scripts/handoff-status.py": ["archived", "archive_reason", "older-than-hours", "gc"],
     "repo/AGENTS.override.md": [
-        "1 MiB",
-        "10,000 lines",
-        "MUST NOT",
-        "Same goal + a materially different implementation strategy",
-        "one active editing-agent session per Git worktree",
-        "resolve-handoff.py --json",
-        "**MUST** write a compact handoff",
-        ".codex-artifacts/handoffs/",
-        "active handoff pointer",
-        "Project priority - SGLang + Ascend correctness",
-        "Model-provider choice and token-cost optimization are subordinate",
-    ],
-    "repo/.agents/skills/sglang-pr-review/SKILL.md": [
-        "new-handoff.sh <N>",
-        ".codex-artifacts/handoffs/",
-    ],
-    "docs/VSCODE.md": [
-        "recommended daily interface",
-        "WSL: Ubuntu",
-        "The current CLI conversation and the current extension conversation are separate sessions",
-    ],
-    "docs/AUTOMATION.md": [
-        "Hard / hook-driven",
-        "Instruction-enforced",
-        "Large logs - automatic by rule",
-        "Handoff discovery - automatic by hook",
+        "one active editing-agent session per Git worktree", ">=1 MiB", "sglang-ascend-kernel-dev", "sglang-npu-perf-experiment",
+        "Measured retrieval budget", "workflow-review-packet.py", "workflow-handoffs gc", "workflow-exp record",
     ],
     "README.md": [
-        "Use Codex as the primary model?",
-        "Installation levels",
-        "Measured token reduction on SGLang sessions",
-        "## Version tracking",
-        "~/.config/sglang-workflow/install.env",
-        "ai-task --dry-run review 34855",
-        "~/.config/sglang-workflow/models.env",
-        "./setup.sh --list-model-presets",
-        "## Project priority: SGLang + Ascend engineering",
-        "SGLang + core Ascend/`torch_npu` skill layer",
+        "OpenCode stays optional", "workflow-skills status", "GLM Coding Plan", "PostToolUse", "workflow-review-packet.py",
+        "Standard | Codex-first workflow + OpenAI extension + core Ascend skills; Semble/Serena off",
     ],
-
-    "setup.sh": [
-        "Select installation level:",
-        "Use Codex as the primary model?",
-        "--level light|standard|full|custom",
-        "--list-model-presets",
-        "INSTALL_MANIFEST",
-        "AI_PRIMARY_BACKEND",
-        "workflow-kit-version",
-    ],
-    "docs/MODELS.md": [
-        "Pricing/status checked:",
-        "DeepSeek V4",
-        "Z.AI / GLM",
-        "Kimi",
-        "MiniMax",
-        "Qwen3-Coder-Plus",
-        "OpenRouter free models",
-        "Self-hosted models",
-        "SGLang + Ascend priority",
-        "alibaba-payg",
-    ],
-    "docs/MULTI_MODEL.md": [
-        "AI_PRIMARY_BACKEND",
-        "AI_ROUTING_MODE=primary",
-        "Provider fallback is not semantic verification",
-        "workflow-configure",
-        "ai-task --dry-run",
-        "Routing invariant: SGLang + Ascend comes first",
-        "user-selected primary backend is tried first",
-    ],
-    "bin/ai-task": [
-        "OPENCODE_CONFIG_CONTENT",
-        "WORKFLOW_PRODUCER",
-        "AI_PRIMARY_BACKEND",
-        "AI_ROUTING_MODE",
-        "AI_ENABLE_CODEX_FALLBACK",
-        "codex_tier_for_kind",
-        "hard_primary_kinds",
-        "version/runtime/workload baseline",
-    ],
-    "opencode/models.env.example": [
-        "AI_PRIMARY_BACKEND=codex",
-        "AI_ROUTING_MODE=primary",
-        "AI_LOCAL_MODEL",
-        "AI_CHEAP_MODEL",
-        "AI_STRONG_MODEL",
-    ],
-    "repo/.codex/scripts/new-handoff.sh": [
-        "producer: ${WORKFLOW_PRODUCER:-codex}",
-        "consumer: ${WORKFLOW_CONSUMER:-codex}",
-        ".active-pr-",
-        "codex-sglang-active-handoff/v1",
-    ],
-    "repo/.codex/scripts/resolve-handoff.py": [
-        "active-pointer",
-        "no-active-pointer",
-        "STALE_HOURS = 48",
-        "is_handoff_template",
-    ],
-    "repo/.codex/scripts/migrate-artifacts.py": [
-        "TEMPLATE-review.md",
-        "is_handoff_template",
-    ],
-    "repo/.codex/scripts/workflow-doctor.py": [
-        "hooks/list",
-        "trust_status",
-        "current_hash",
-        "current hash NOT verified",
-        "external_model_state",
-        "External tiers:",
-    ],
-    "repo/.codex/scripts/handoff-status.py": [
-        ".active-pr-",
-        "clear_pointer_if_matching",
-    ],
-    "codex/hooks.json": [
-        "SessionStart",
-        "UserPromptSubmit",
-        "session_start.py",
-        "prompt_guard.py",
-    ],
-    ".github/workflows/validate.yml": [
-        "bash -n setup.sh",
-        "bin/local-task",
-        "bin/workflow-configure",
-        "python3 -m py_compile bin/ai-task bin/workflow-configure",
-    ],
-    "docs/ASCEND.md": [
-        "This is the primary domain workflow of the project",
-        "Model-backend invariant",
-        "compatibility baseline",
-        "silent fallback",
-    ],
-    "docs/WORKFLOW.md": [
-        "selected primary backend is authoritative",
-        "cost routing must never bypass the Ascend compatibility baseline",
-        "PRIMARY first",
-    ],
-    "docs/UPDATING.md": [
-        "06-update-existing-workspace.sh",
-        "setup.sh --update",
-        "install.env",
-        "ALLOW_DOWNGRADE=1",
-        "models.env",
-    ],
-    "docs/VERSIONING.md": [
-        "Semantic Versioning",
-        "workflow-kit-version",
-        ".agents/.workflow-kit-version",
-        "install.env",
-        "kit-version-history.tsv",
-    ],
-    "windows/01-bootstrap-windows.ps1": [
-        "Ensure-VSCodeExtension",
-        "Model-specific VS Code extensions are installed later",
-        "ms-vscode-remote.remote-wsl",
-    ],
-    "wsl/02-bootstrap-wsl.sh": [
-        "workflow-kit-version",
-        "KIT_VERSION",
-        "INSTALL_CODEX",
-        "INSTALL_OPENCODE",
-        "models.env",
-        "workflow-configure",
-    ],
-    "wsl/03-setup-sglang-workspace.sh": [
-        "Bundled SGLang workflow skills",
-        "Light installation complete",
-        ".agents/.workflow-kit-version",
-        'EXCLUDE="$SGLANG/$EXCLUDE"',
-        "Provider-neutral repo workflow layer",
-        "opencode.json",
-        "awesome-ascend-skills",
-        "SGLang + Ascend skill layer",
-    ],
-    "wsl/06-update-existing-workspace.sh": [
-        "saved installation manifest",
-        "setup.sh",
-        "--update",
-        "--workspace",
-    ],
+    "wsl/06-update-existing-workspace.sh": ["v0.1.x", "Created migration manifest", "install.env"],
+    "bin/workflow-skills": ["checkout", "--detach", "update requires at least one --only SOURCE", ".skills-index.json"],
 }
 for rel, needles in contracts.items():
     path = ROOT / rel
     if path.exists():
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text()
         for needle in needles:
             if needle not in text:
-                errors.append(f"missing workflow contract in {rel}: {needle}")
+                errors.append(f"{rel}: missing contract {needle}")
+
+# Destructive upgrade regressions must never return. Fresh-only config creation is allowed.
+bootstrap = (ROOT / "wsl/02-bootstrap-wsl.sh").read_text() if (ROOT / "wsl/02-bootstrap-wsl.sh").exists() else ""
+if 'if [[ ! -e "$CODEX_HOME/config.toml" ]]' not in bootstrap or "merge-codex-config.py" not in bootstrap:
+    errors.append("bootstrap lacks guarded/non-destructive config creation")
+if 'backup "$CODEX_HOME/config.toml"' in bootstrap:
+    errors.append("bootstrap still uses legacy replace-style config backup path")
+if 'cp "$KIT_ROOT/codex/hooks.json" "$CODEX_HOME/hooks.json"' in bootstrap:
+    errors.append("bootstrap destructively copies hooks.json")
+if "merge-codex-hooks.py" not in bootstrap:
+    errors.append("bootstrap does not merge hooks")
 
 if errors:
     print("Repository validation failed:", file=sys.stderr)
     for error in errors:
-        print(f"- {error}", file=sys.stderr)
+        print("- " + error, file=sys.stderr)
     raise SystemExit(1)
-
-print("Repository metadata, JSON, TOML, docs, and Semble timeout: OK")
+print("Repository metadata, non-destructive Codex migration, retrieval governor, bounded reducers, skill pins, and provider isolation: OK")
