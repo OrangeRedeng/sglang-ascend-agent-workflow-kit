@@ -1,9 +1,0 @@
-.git/
-.codex/
-.codex-artifacts/
-.agents/
-__pycache__/
-*.pyc
-*.log
-build/
-dist/

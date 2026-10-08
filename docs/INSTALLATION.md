@@ -1,53 +1,43 @@
 # Installation
 
-## Recommended
+## Existing installation
 
 ```bash
-chmod +x setup.sh wsl/*.sh bin/* repo/.codex/scripts/* scripts/*.py
-./setup.sh --level standard --primary codex --enable-glm --glm-region china
+cd ~/code
+rm -rf sglang-ascend-agent-workflow-kit-v0.6.0
+unzip -q sglang-ascend-agent-workflow-kit-v0.6.0.zip -d sglang-ascend-agent-workflow-kit-v0.6.0
+cd sglang-ascend-agent-workflow-kit-v0.6.0
+chmod +x setup.sh wsl/*.sh bin/* scripts/*.sh scripts/*.py repo/.codex/scripts/*
+./wsl/06-update-existing-workspace.sh
 ```
 
-`standard` keeps Codex/OpenAI + the OpenAI VS Code extension as the daily interface and installs the workflow/handoff/core Ascend layer. Semble and Serena are intentionally not installed by Standard in v0.3.1.
-
-Use `--level full` when you also want Semble, Serena, CANNBot, selected KernelHive skills, BBuf skills and `sgl-kernel-npu`.
+The updater preserves `~/.codex/config.toml`, removes old Kilo/OpenCode/legacy GLM-routing artifacts, installs the unified Copilot provider stack, canonicalizes shared skills and runs the doctor suite.
 
 ## Levels
 
-- `light`: SGLang + bundled/core Ascend skills; no model client/router/hooks.
-- `standard`: Codex-first workflow, OpenAI extension, router, handoffs, core Ascend skills.
-- `full`: Standard + Semble + Serena + CANNBot + selected KernelHive + BBuf + kernel repo.
-- `custom`: choose each component; Semble/Serena default to no.
+- `light`: shared workflow + core skills only.
+- `standard`: Copilot Chat + Codex Bridge + GLM provider + official Codex fallback + core Ascend + selected CANNBot skills.
+- `full`: Standard + KernelHive + selected BBuf skills + `sgl-kernel-npu`.
 
-## GLM Coding Plan
+## Account setup
 
-```bash
-workflow-configure --enable-glm --glm-region china
-# or global
-workflow-configure --enable-glm --glm-region global
-```
-
-The secret is stored only in `~/.config/sglang-workflow/models.env` (0600). Codex GLM profiles obtain the token through `workflow-provider-token`; TOML files contain no API key.
-
-## Existing Codex configuration
-
-v0.3.1 does not replace `~/.codex/config.toml`. On a fresh machine it creates only a minimal file if none exists. On an existing setup it preserves user model/reasoning settings, project trust, hook trust hashes, memories and unrelated MCP servers.
-
-Hook installation is also merged. After new/changed hook definitions, launch Codex and review `/hooks`.
-
-## External skill pins
-
-`skills.lock.json` contains immutable commit pins. Setup checks out those commits in detached HEAD state and validates selected skills. Use:
+Run:
 
 ```bash
-workflow-skills status
-workflow-skills snapshot
-workflow-skills index
+workflow-copilot guide
 ```
 
-Advancing a dependency is deliberately explicit:
+Manual actions:
+
+1. `Codex Bridge: Add ChatGPT Account` → profile `personal` → OAuth.
+2. `Chat: Manage Language Models` → Add Models → Codex Bridge → profile `personal`.
+3. `GLM: Set API Key` → BigModel China Coding Plan key.
+
+Credentials remain in VS Code SecretStorage and are not written by the kit.
+
+## Verify
 
 ```bash
-workflow-skills update --only cannbot-skills
+cd ~/code/sglang
+workflow-setup doctor --workspace "$PWD"
 ```
-
-This updates the private installed lock under `~/.config/sglang-workflow/`; release pins in the repository remain unchanged until deliberately committed in a new kit release.

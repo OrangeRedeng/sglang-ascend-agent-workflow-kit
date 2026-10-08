@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+PREFIX = Path.home() / ".local/npm"
+BIN = PREFIX / "bin/codex"
+BASHRC = Path.home() / ".bashrc"
+START = "# >>> sglang-workflow-codex-user-prefix >>>"
+END = "# <<< sglang-workflow-codex-user-prefix <<<"
+
+
+def run(cmd: list[str], timeout: int = 180, env: dict[str, str] | None = None) -> tuple[int, str]:
+    try:
+        p = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False, env=env)
+        return p.returncode, p.stdout.strip()
+    except Exception as exc:
+        return 1, str(exc)
+
+
+def all_codex() -> list[str]:
+    rc, out = run(["bash", "-lc", "type -a -p codex 2>/dev/null || true"], timeout=10)
+    result: list[str] = []
+    for line in out.splitlines():
+        p = line.strip()
+        if p and p not in result:
+            result.append(p)
+    active = shutil.which("codex")
+    if active and active not in result:
+        result.insert(0, active)
+    return result
+
+
+def version_for(path: str) -> tuple[bool, str]:
+    rc, out = run([path, "--version"], timeout=20)
+    return rc == 0, out.splitlines()[-1] if out else f"exit={rc}"
+
+
+def status() -> int:
+    paths = all_codex()
+    active = shutil.which("codex")
+    print(f"Active Codex: {active or 'missing'}")
+    healthy = False
+    if active:
+        healthy, detail = version_for(active)
+        print(f"Active status: {'OK' if healthy else 'BROKEN'} - {detail}")
+        if active.startswith("/mnt/c/"):
+            print("Warning: WSL is resolving a Windows npm Codex binary. Prefer the WSL user-local install.")
+    print("Resolved Codex binaries:")
+    for path in paths:
+        ok, detail = version_for(path)
+        print(f"  {'OK' if ok else 'BROKEN'} {path} :: {detail}")
+    print(f"Preferred WSL path: {BIN}")
+    return 0 if healthy and active and not active.startswith("/mnt/c/") else 1
+
+
+def update_bashrc() -> None:
+    text = BASHRC.read_text(encoding="utf-8") if BASHRC.exists() else ""
+    kit_start = "# >>> codex-sglang-workflow-kit >>>"
+    kit_end = "# <<< codex-sglang-workflow-kit <<<"
+    if kit_start in text and kit_end in text:
+        before, rest = text.split(kit_start, 1)
+        body, after = rest.split(kit_end, 1)
+        lines = body.strip("\n").splitlines()
+        replaced = False
+        for i, line in enumerate(lines):
+            if line.startswith("export PATH="):
+                lines[i] = 'export PATH="$HOME/.local/npm/bin:$HOME/.local/bin:$PATH"'
+                replaced = True
+                break
+        if not replaced:
+            lines.insert(0, 'export PATH="$HOME/.local/npm/bin:$PATH"')
+        text = before + kit_start + "\n" + "\n".join(lines) + "\n" + kit_end + after
+        BASHRC.write_text(text, encoding="utf-8")
+        return
+    if START in text and END in text:
+        before, rest = text.split(START, 1)
+        _, after = rest.split(END, 1)
+        text = before.rstrip() + "\n" + after.lstrip("\n")
+    block = f'{START}\nexport PATH="$HOME/.local/npm/bin:$PATH"\n{END}\n'
+    BASHRC.write_text(text.rstrip() + "\n\n" + block, encoding="utf-8")
+
+
+def repair() -> int:
+    npm = shutil.which("npm")
+    if not npm:
+        print("npm is not available in WSL; install Node.js/npm first.", file=sys.stderr)
+        return 2
+    PREFIX.mkdir(parents=True, exist_ok=True)
+    # Clean only the kit-owned/user-local target. Never mutate /usr/local or Windows npm trees.
+    pkg = PREFIX / "lib/node_modules/@openai/codex"
+    if pkg.exists():
+        shutil.rmtree(pkg, ignore_errors=True)
+    parent = pkg.parent
+    if parent.is_dir():
+        for path in parent.glob(".codex-*"):
+            shutil.rmtree(path, ignore_errors=True)
+    try:
+        BIN.unlink(missing_ok=True)
+    except Exception:
+        pass
+    cmd = [npm, "install", "--global", "--prefix", str(PREFIX), "@openai/codex@latest", "--include=optional"]
+    print("Installing Codex into user-owned WSL prefix:")
+    print("  " + " ".join(cmd))
+    rc, out = run(cmd, timeout=300)
+    if out:
+        print(out)
+    if rc:
+        print("User-local Codex install failed. Existing system/Windows installs were not modified.", file=sys.stderr)
+        return rc
+    update_bashrc()
+    env = os.environ.copy()
+    env["PATH"] = f"{PREFIX / 'bin'}:{env.get('PATH','')}"
+    rc, out = run([str(BIN), "--version"], timeout=20, env=env)
+    if rc:
+        print(out or "Installed Codex is not runnable", file=sys.stderr)
+        return 1
+    print(f"Installed: {out}")
+    print(f"Path: {BIN}")
+    print("Run: export PATH=\"$HOME/.local/npm/bin:$PATH\"; hash -r")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Diagnose or repair Codex CLI inside WSL without sudo")
+    ap.add_argument("command", choices=("status", "doctor", "repair", "install-user"), nargs="?", default="status")
+    args = ap.parse_args()
+    if args.command in {"repair", "install-user"}:
+        return repair()
+    rc = status()
+    if args.command == "doctor" and rc:
+        print("Recommended: workflow-codex repair")
+    return rc
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,39 +1,15 @@
 # Acknowledgements
 
-This workflow kit builds on the work and documentation of several open-source projects and communities.
+This workflow integrates or learns from the following projects:
 
-## Core tooling
+- [OpenAI Codex](https://developers.openai.com/codex/) - ChatGPT/Codex backend and official fallback extension.
+- [GitHub Copilot / VS Code agent tooling](https://code.visualstudio.com/docs/copilot/overview) - primary shared chat/agent UI and Agent Skills host.
+- [Codex Bridge for Copilot Chat](https://github.com/grikomsn/openai-oauth-copilot-chat) - unofficial ChatGPT OAuth/Codex language-model provider, reasoning controls, tool calls, and quota display.
+- [GLM Models for GitHub Copilot Chat](https://github.com/KiwiGaze/glm-for-copilot) - BigModel/Zhipu GLM provider, reasoning controls, and Coding Plan quota display.
+- [SGLang](https://github.com/sgl-project/sglang) - target serving project.
+- [Ascend agent-skills](https://github.com/Ascend/agent-skills) and [awesome-ascend-skills](https://github.com/ascend-ai-coding/awesome-ascend-skills) - Ascend/NPU skills.
+- [CANNBot skills](https://gitcode.com/cann/cannbot-skills) - CANN/AscendC kernel and debugging skills.
+- [KernelHive ascendc-skill](https://github.com/KernelHive/ascendc-skill) - optional experimental AscendC skills.
+- [BBuf AI-Infra-Auto-Driven-SKILLS](https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS) - optional SGLang/performance skills.
 
-- [OpenAI Codex](https://developers.openai.com/codex/) - coding agent, CLI, configuration, MCP, hooks, profiles, and agent workflows used by this kit.
-- [OpenCode](https://opencode.ai/) - optional provider-neutral coding-agent harness used for self-hosted and external worker tiers.
-- [SGLang](https://github.com/sgl-project/sglang) - the primary serving repository this workflow targets.
-- [sgl-kernel-npu](https://github.com/sgl-project/sgl-kernel-npu) - Ascend/NPU kernels and related optimized components used by SGLang.
-- [Ascend/pytorch](https://github.com/Ascend/pytorch) - the PyTorch adapter that provides the `torch_npu` runtime used by Ascend PyTorch workloads.
-- [Semble](https://github.com/MinishLab/semble) by MinishLab - local semantic code search and MCP integration.
-- [Serena](https://github.com/oraios/serena) by Oraios - optional symbol-aware/LSP-based code navigation and refactoring.
-
-## Skills and engineering workflows
-
-- [AI-Infra-Auto-Driven-SKILLS](https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS) by BBuf.
-- [Ascend Agent Skills](https://github.com/Ascend/agent-skills).
-- [awesome-ascend-skills](https://github.com/ascend-ai-coding/awesome-ascend-skills).
-- [CANNBot Skills](https://gitcode.com/cann/cannbot-skills) - CANN/Ascend kernel, profiling, debugging, architecture and model-inference skills.
-- [KernelHive ascendc-skill](https://github.com/KernelHive/ascendc-skill) - experimental AscendC generation and optimization workflows.
-
-## Supporting developer tools
-
-- [GitHub CLI](https://github.com/cli/cli)
-- [uv](https://github.com/astral-sh/uv)
-- [ripgrep](https://github.com/BurntSushi/ripgrep)
-- [Visual Studio Code](https://code.visualstudio.com/) and the WSL extension
-- [WSL](https://learn.microsoft.com/windows/wsl/) for the Windows/Linux development environment
-
-## Methodology inspiration
-
-The session/handoff/Goal/artifact-ledger approach is informed by the SGLang Team article [Agent-Assisted SGLang Development: An Initial Exploration](https://www.lmsys.org/blog/2026-07-02-agent-assisted-sglang-development).
-
-## Trademark and license note
-
-Names and trademarks belong to their respective owners. This repository does not vendor the external skill repositories listed above; setup scripts clone them from their original sources and link selected skills into a local SGLang checkout. Each external project remains governed by its own license and terms.
-
-This workflow kit is an independent project and is not affiliated with or endorsed by OpenAI, OpenCode, the SGLang project, Huawei/Ascend, MinishLab, Oraios, BBuf, KernelHive, Zhipu AI/BigModel, or the other projects listed above.
+This is an independent project and is not affiliated with or endorsed by those projects or their maintainers.

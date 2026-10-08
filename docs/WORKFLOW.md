@@ -1,34 +1,35 @@
 # Workflow
 
-## Session lifecycle
+The durable workflow is independent of model UI:
 
 ```text
-NEW OBJECTIVE -> NEW SESSION
-SAME GOAL + NEW IMPLEMENTATION STRATEGY -> NEW SESSION
-SAME GOAL + SAME STRATEGY -> continue, but checkpoint when retrieval budget grows
-ONE ACTIVE EDITING AGENT SESSION PER GIT WORKTREE
+Chat/session = working memory
+Git          = code state
+Handoff      = bounded task state
+Goal         = long experiment state
 ```
 
-Measured rollout data showed that long high-tool-call sessions became the largest remaining input-token hotspot. v0.3.1 therefore adds a session/retrieval governor. Its warnings are guardrails, not substitutes for engineering judgment.
+Use one active editing agent per worktree.
 
-## Implementation continuation
-
-For code-changing work:
+For broad PR review, generate one bounded review packet before iterative exploration:
 
 ```bash
-python3 .codex/scripts/resolve-handoff.py --json --prompt '<task>'
+python3 .codex/scripts/workflow-review-packet.py --base origin/main
 ```
 
-Use a selected fresh handoff, re-verify against HEAD, and avoid reconstructing the previous review. Mark consumed only after all actionable items are completed/obsolete.
+For large logs:
 
-## PR review
+```bash
+python3 .codex/scripts/extract-log-context.py <log>
+```
 
-For a broad PR use the deterministic review packet first. It creates changed-file/component coverage and narrow diffs in one bounded artifact. Expand only suspicious regions. Do not replace many round trips with one giant unbounded diff.
+For handoffs:
 
-## Large logs
+```bash
+python3 .codex/scripts/resolve-handoff.py --json --prompt "<task>"
+workflow-handoffs gc --older-than-hours 48
+```
 
-Check size without reading content. At >=1 MiB or >=10,000 lines, run the reducer first. First-stage output is bounded; expand only a specific normalized signature when needed.
+For performance/kernel Goals, record exact commands, environment, SHAs, correctness evidence, and numeric results in `results.jsonl` through `workflow-exp`.
 
-## Long performance work
-
-Use Goal artifacts. One experiment round = one hypothesis + one scoped change + correctness + identical benchmark + decision. Numeric metrics go to `results.jsonl` via `workflow-exp`, human rationale remains in Markdown. When the session becomes retrieval-heavy, persist state and continue the next round in a new session rather than carrying the full conversation.
+The 32/44-call retrieval discipline is shared in `AGENTS.md`. The official Codex fallback additionally enforces it with `PostToolUse`; Codex Bridge and GLM run under the Copilot Chat harness, so native Codex hooks do not execute there.

@@ -1,37 +1,26 @@
-# VS Code + Codex
+# VS Code workflow
 
-The recommended daily interface is VS Code opened from the WSL SGLang worktree:
+Open the SGLang worktree from WSL:
 
 ```bash
 cd ~/code/sglang
 code .
 ```
 
-Confirm the bottom-left remote indicator is `WSL: Ubuntu` (or your WSL distribution). The OpenAI extension remains the primary UI and its native OpenAI model/reasoning controls remain untouched by GLM installation.
-
-## Provider switching
-
-OpenAI uses the normal default configuration and profiles `sglang-lite`, `sglang`, `sglang-hard`, and `sglang-xhigh`.
-
-GLM uses isolated profiles because a provider switch must change both model and provider atomically. Use:
+Use **GitHub Copilot Chat** as the normal UI. The updater installs:
 
 ```text
-cgl  GLM low
-cg   GLM high
-cgh  GLM high
-cgx  GLM max
+GitHub.copilot-chat
+grikomsn.openai-oauth-copilot-chat
+yijiazhen-qi.glm-for-github-copilot-chat
+OpenAI.chatgpt   # fallback only
 ```
 
-or:
+Copilot Chat then hosts two independent providers:
 
-```bash
-codex-glm --effort max
-```
+- **Codex Bridge**: ChatGPT OAuth, live Codex model catalog, model-specific reasoning controls, agent tool calls and Codex quota status.
+- **GLM Models**: BigModel China Coding Plan, GLM model picker entries, Low/High/Max for GLM-5.3 and Coding Plan quota status.
 
-This deliberately avoids replacing the default Codex model catalog with the GLM-only catalog.
+The official OpenAI Codex extension remains installed as a fallback because Codex-specific hooks execute only in the native Codex runtime, not when the Codex model is hosted by Copilot Chat.
 
-The current CLI conversation and the current extension conversation are separate sessions. Use handoffs/Goals to transfer durable state instead of assuming one interface shares the other's transcript.
-
-## Hooks
-
-After installation or hook changes, run `/hooks` in Codex and review/approve `SessionStart`, `UserPromptSubmit`, and the new `PostToolUse` retrieval-budget hook. The workflow doctor reports structure but does not grant trust.
+Shared `AGENTS.md` and `.agents/skills/` apply to the project regardless of which provider is selected in Copilot Chat.

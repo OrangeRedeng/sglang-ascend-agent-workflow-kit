@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+
+COPILOT_EXT = "github.copilot-chat"
+CODEX_BRIDGE_EXT = "grikomsn.openai-oauth-copilot-chat"
+GLM_EXT = "yijiazhen-qi.glm-for-github-copilot-chat"
+OFFICIAL_CODEX_EXT = "openai.chatgpt"
+REQUIRED_VSCODE = (1, 127, 0)  # GLM extension requires VS Code >= 1.127.
+
+KIT_SETTINGS = {
+    "glm-copilot.apiMode": "coding-plan",
+    "glm-copilot.region": "china",
+    "glm-copilot.thinking": "enabled",
+    "glm-copilot.showUsageStatusBar": True,
+    "glm-copilot.usageRefreshIntervalMinutes": 5,
+    "openaiCodex.showUsageStatusBar": True,
+    "openaiCodex.catalogCacheMinutes": 5,
+    "openaiCodex.debugLogging": False,
+    "chat.useAgentsMdFile": True,
+    "chat.useAgentSkills": True,
+}
+
+
+def run(cmd: list[str], cwd: Path | None = None, timeout: int = 120) -> tuple[int, str]:
+    try:
+        p = subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+        return p.returncode, p.stdout.strip()
+    except Exception as exc:
+        return 1, f"{type(exc).__name__}: {exc}"
+
+
+def strip_jsonc(text: str) -> str:
+    out: list[str] = []
+    i = 0
+    in_string = False
+    escaped = False
+    while i < len(text):
+        c = text[i]
+        if in_string:
+            out.append(c)
+            if escaped:
+                escaped = False
+            elif c == "\\":
+                escaped = True
+            elif c == '"':
+                in_string = False
+            i += 1
+            continue
+        if c == '"':
+            in_string = True
+            out.append(c)
+            i += 1
+            continue
+        if c == "/" and i + 1 < len(text) and text[i + 1] == "/":
+            i += 2
+            while i < len(text) and text[i] not in "\r\n":
+                i += 1
+            continue
+        if c == "/" and i + 1 < len(text) and text[i + 1] == "*":
+            i += 2
+            while i + 1 < len(text) and not (text[i] == "*" and text[i + 1] == "/"):
+                i += 1
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return re.sub(r",\s*([}\]])", r"\1", "".join(out))
+
+
+def read_jsonc(path: Path) -> dict:
+    if not path.is_file():
+        return {}
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if not text.strip():
+        return {}
+    data = json.loads(strip_jsonc(text))
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return data
+
+
+def backup(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    stamp = subprocess.run(["date", "+%Y%m%d-%H%M%S"], text=True, stdout=subprocess.PIPE, check=False).stdout.strip() or "backup"
+    dest = path.with_name(path.name + f".bak-{stamp}")
+    n = 1
+    while dest.exists():
+        dest = path.with_name(path.name + f".bak-{stamp}-{n}")
+        n += 1
+    shutil.copy2(path, dest)
+    return dest
+
+
+def workspace_root(value: str | None) -> Path:
+    return Path(value or os.environ.get("SGLANG", str(Path.home() / "code/sglang"))).expanduser().resolve()
+
+
+def list_extensions(root: Path) -> tuple[bool, set[str], str]:
+    code = shutil.which("code")
+    if not code:
+        return False, set(), "VS Code CLI 'code' not found in WSL"
+    rc, out = run([code, "--list-extensions"], cwd=root, timeout=60)
+    if rc:
+        return False, set(), out or "extension query failed"
+    return True, {line.strip().lower() for line in out.splitlines() if line.strip()}, ""
+
+
+def vscode_version(root: Path) -> tuple[bool, tuple[int, int, int] | None, str]:
+    code = shutil.which("code")
+    if not code:
+        return False, None, "VS Code CLI not found"
+    rc, out = run([code, "--version"], cwd=root, timeout=30)
+    if rc:
+        return False, None, out or "version query failed"
+    first = out.splitlines()[0].strip() if out else ""
+    m = re.match(r"(\d+)\.(\d+)\.(\d+)", first)
+    if not m:
+        return False, None, first or "unparseable version"
+    ver = tuple(map(int, m.groups()))
+    return ver >= REQUIRED_VSCODE, ver, first
+
+
+def install_extensions(root: Path) -> int:
+    code = shutil.which("code")
+    if not code:
+        print("VS Code CLI 'code' is unavailable in WSL; open the repo with VS Code Remote WSL and rerun.", file=sys.stderr)
+        return 1
+    ok, installed, _ = list_extensions(root)
+    if not ok:
+        installed = set()
+    failures = 0
+    for ext in (COPILOT_EXT, CODEX_BRIDGE_EXT, GLM_EXT, OFFICIAL_CODEX_EXT):
+        if ext in installed:
+            print(f"extension OK: {ext}")
+            continue
+        rc, out = run([code, "--install-extension", ext, "--force"], cwd=root, timeout=180)
+        if rc:
+            failures += 1
+            print(f"extension install failed: {ext}\n{out}", file=sys.stderr)
+        else:
+            print(f"installed extension: {ext}")
+    return failures
+
+
+def configure_settings(root: Path) -> int:
+    path = root / ".vscode/settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = read_jsonc(path)
+    except Exception as exc:
+        print(f"Cannot parse existing {path}: {exc}", file=sys.stderr)
+        return 1
+    changed = False
+    for key, value in KIT_SETTINGS.items():
+        if data.get(key) != value:
+            data[key] = value
+            changed = True
+    if changed:
+        old = backup(path)
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        print(f"configured workspace settings: {path}")
+        if old:
+            print(f"  backup: {old}")
+    else:
+        print(f"workspace settings already configured: {path}")
+    return 0
+
+
+def skill_issues(root: Path) -> tuple[int, list[str]]:
+    skill_root = root / ".agents/skills"
+    if not skill_root.is_dir():
+        return 0, ["missing .agents/skills"]
+    count = 0
+    issues: list[str] = []
+    names: dict[str, Path] = {}
+    for child in sorted(skill_root.iterdir()):
+        skill = child / "SKILL.md"
+        if not skill.is_file():
+            continue
+        count += 1
+        text = skill.read_text(encoding="utf-8", errors="replace")
+        m = re.match(r"^---\s*\n(.*?)\n---\s*\n", text, re.S)
+        if not m:
+            issues.append(f"{child.name}: missing YAML frontmatter")
+            continue
+        front = m.group(1)
+        nm = re.search(r"(?m)^name:\s*['\"]?([^'\"\n]+)", front)
+        desc = re.search(r"(?m)^description:\s*.+$", front)
+        if not nm:
+            issues.append(f"{child.name}: missing name")
+            continue
+        name = nm.group(1).strip()
+        if name != child.name:
+            issues.append(f"{child.name}: frontmatter name is {name!r}; directory must match")
+        if not desc:
+            issues.append(f"{child.name}: missing description")
+        if name in names and names[name] != child:
+            issues.append(f"duplicate skill name {name}: {names[name]} and {child}")
+        names[name] = child
+    return count, issues
+
+
+def doctor(root: Path) -> int:
+    failures = 0
+    print("Copilot unified-UI doctor")
+    print("========================")
+
+    def check(ok: bool, label: str, detail: str = "") -> None:
+        nonlocal failures
+        print(f"[{'PASS' if ok else 'FAIL'}] {label}{(': ' + detail) if detail else ''}")
+        if not ok:
+            failures += 1
+
+    vok, ver, vdetail = vscode_version(root)
+    check(vok, "VS Code version", f"{vdetail}; required >= {'.'.join(map(str, REQUIRED_VSCODE))}")
+    ok, exts, detail = list_extensions(root)
+    check(ok, "VS Code extension query", detail if not ok else "OK")
+    if ok:
+        check(COPILOT_EXT in exts, "GitHub Copilot Chat", COPILOT_EXT)
+        check(CODEX_BRIDGE_EXT in exts, "Codex Bridge", CODEX_BRIDGE_EXT)
+        check(GLM_EXT in exts, "GLM provider", GLM_EXT)
+        check(OFFICIAL_CODEX_EXT in exts, "Official Codex fallback", OFFICIAL_CODEX_EXT)
+        check("kilocode.kilo-code" not in exts, "Kilo absent")
+
+    settings = root / ".vscode/settings.json"
+    try:
+        data = read_jsonc(settings)
+        missing = [f"{k}={v!r}" for k, v in KIT_SETTINGS.items() if data.get(k) != v]
+        check(not missing, "Workspace Copilot/provider settings", ", ".join(missing) if missing else str(settings))
+    except Exception as exc:
+        check(False, "Workspace Copilot/provider settings", str(exc))
+
+    check((root / "AGENTS.md").is_file(), "Shared root AGENTS.md", str(root / "AGENTS.md"))
+    count, issues = skill_issues(root)
+    check(count > 0 and not issues, "Shared Agent Skills", f"{count} skills" if not issues else f"{count} skills; {len(issues)} issue(s)")
+    for issue in issues:
+        print(f"  - {issue}")
+
+    legacy = []
+    for p in (root / ".kilo", root / "kilo.jsonc", root / "AGENTS.override.md", root / ".sembleignore", root / "opencode.json"):
+        if p.exists() or p.is_symlink():
+            legacy.append(str(p.relative_to(root)))
+    check(not legacy, "Legacy harness clutter removed", ", ".join(legacy) if legacy else "OK")
+
+    print()
+    print("Manual account steps that VS Code intentionally keeps in SecretStorage/UI:")
+    print("  1. Command Palette -> 'Codex Bridge: Add ChatGPT Account' -> profile id 'personal' -> complete ChatGPT OAuth.")
+    print("  2. Chat -> Manage Language Models -> Add Models -> Codex Bridge -> use profile 'personal' and enable desired Codex models.")
+    print("  3. Command Palette -> 'GLM: Set API Key' -> paste BigModel China Coding Plan key.")
+    print("  4. Copilot Chat model picker -> verify both Codex Bridge and GLM models; check both status-bar quota items.")
+    print("The official OpenAI Codex extension remains installed only as a fallback for native Codex hooks/runtime.")
+    return 1 if failures else 0
+
+
+def status(root: Path) -> int:
+    ok, exts, detail = list_extensions(root)
+    print(f"workspace: {root}")
+    print(f"code query: {'OK' if ok else detail}")
+    if ok:
+        for ext, label in [
+            (COPILOT_EXT, "Copilot Chat"),
+            (CODEX_BRIDGE_EXT, "Codex Bridge"),
+            (GLM_EXT, "GLM provider"),
+            (OFFICIAL_CODEX_EXT, "Official Codex fallback"),
+        ]:
+            print(f"{label}: {'installed' if ext in exts else 'missing'}")
+    print(f"AGENTS.md: {'OK' if (root/'AGENTS.md').is_file() else 'missing'}")
+    print(f"settings: {'OK' if (root/'.vscode/settings.json').is_file() else 'missing'}")
+    return 0
+
+
+def guide() -> int:
+    print("Copilot Chat unified model setup")
+    print("1. Codex Bridge: Add ChatGPT Account -> profile 'personal' -> OAuth.")
+    print("2. Chat: Manage Language Models -> Add Models -> Codex Bridge -> profile 'personal'.")
+    print("3. GLM: Set API Key -> BigModel China Coding Plan key.")
+    print("4. Use the Copilot Chat model picker to switch between Codex and GLM; use each model's reasoning control.")
+    print("5. Click the Codex/GLM status-bar items to inspect 5-hour/weekly usage and reset timing.")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Configure one Copilot Chat UI for ChatGPT Codex + BigModel GLM")
+    ap.add_argument("command", choices=("install", "configure", "doctor", "status", "guide"))
+    ap.add_argument("--workspace")
+    args = ap.parse_args()
+    root = workspace_root(args.workspace)
+    if args.command == "install":
+        return install_extensions(root)
+    if args.command == "configure":
+        return install_extensions(root) + configure_settings(root)
+    if args.command == "doctor":
+        return doctor(root)
+    if args.command == "guide":
+        return guide()
+    return status(root)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

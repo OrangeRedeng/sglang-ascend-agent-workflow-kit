@@ -13,20 +13,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Validate shell scripts
-        run: bash -n setup.sh wsl/*.sh bin/cx-task bin/glm-task bin/local-task bin/cheap-task bin/strong-task bin/workflow-handoffs repo/.codex/scripts/*.sh scripts/package-release.sh
+        run: bash -n setup.sh wsl/*.sh repo/.codex/scripts/*.sh scripts/package-release.sh
       - name: Validate Python
-        run: python3 -m py_compile bin/ai-task bin/codex-glm bin/workflow-configure bin/workflow-provider-token bin/workflow-skills bin/workflow-exp codex/hooks/*.py repo/.codex/scripts/*.py scripts/*.py
+        run: python3 -m py_compile bin/workflow-codex bin/workflow-copilot bin/workflow-skills bin/workflow-exp bin/workflow-setup codex/hooks/*.py repo/.codex/scripts/*.py scripts/*.py
       - name: Validate repository metadata
         run: python3 scripts/validate_repo.py
-      - name: Smoke test safe Codex config merge
+      - name: Smoke test non-destructive Codex config cleanup
         run: |
           tmp="$(mktemp -d)"
-          cat > "$tmp/config.toml" <<'EOF'
+          cat > "$tmp/config.toml" <<'CFG'
           model = "user-model"
           model_reasoning_effort = "high"
           [features]
           memories = true
-          EOF
+          # >>> sglang-ascend-workflow-kit managed >>>
+          # <<< sglang-ascend-workflow-kit managed <<<
+          CFG
           python3 scripts/merge-codex-config.py "$tmp/config.toml"
           grep -F 'model = "user-model"' "$tmp/config.toml"
           grep -F 'memories = true' "$tmp/config.toml"
@@ -38,6 +40,42 @@ jobs:
           mkdir -p .codex-artifacts
           printf '{"session_id":"test","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"echo ok"},"tool_response":{}}\n' "$tmp" | python3 "$GITHUB_WORKSPACE/codex/hooks/post_tool_budget.py"
           test -f .codex-artifacts/session-budget/test.json
+      - name: Smoke test unified Copilot workspace configuration
+        run: |
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/bin" "$tmp/ws/.agents/skills/demo"
+          cat > "$tmp/bin/code" <<'SH'
+          #!/usr/bin/env bash
+          if [[ "$1" == "--list-extensions" ]]; then
+            printf '%s\n' OpenAI.chatgpt GitHub.copilot-chat grikomsn.openai-oauth-copilot-chat yijiazhen-qi.glm-for-github-copilot-chat
+            exit 0
+          fi
+          exit 0
+          SH
+          chmod +x "$tmp/bin/code"
+          printf '%s\n' '# test' > "$tmp/ws/AGENTS.md"
+          cat > "$tmp/ws/.agents/skills/demo/SKILL.md" <<'MD'
+          ---
+          name: demo
+          description: Demo skill.
+          ---
+          MD
+          PATH="$tmp/bin:$PATH" python3 bin/workflow-copilot configure --workspace "$tmp/ws"
+          grep -F '"glm-copilot.apiMode": "coding-plan"' "$tmp/ws/.vscode/settings.json"
+          grep -F '"glm-copilot.region": "china"' "$tmp/ws/.vscode/settings.json"
+          grep -F '"openaiCodex.showUsageStatusBar": true' "$tmp/ws/.vscode/settings.json"
+      - name: Verify no legacy harness files remain
+        run: |
+          test ! -e bin/workflow-kilo
+          test ! -e bin/workflow-glm-copilot
+          test ! -e opencode
+          test ! -e repo/.kilo
+          test ! -e docs/KILO.md
+          ! find codex/config -maxdepth 1 -name 'glm-*.toml' | grep .
+      - name: Verify bootstrap never root-updates Codex
+        run: |
+          ! grep -Eq 'npm[[:space:]]+install[[:space:]]+-g[[:space:]]+@openai/codex' wsl/02-bootstrap-wsl.sh
+          ! grep -F '$SGLANG/.codex/KIT_VERSION' wsl/03-setup-sglang-workspace.sh
 
   windows-powershell:
     runs-on: windows-latest

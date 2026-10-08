@@ -19,18 +19,26 @@ def require(path: str) -> None:
 
 required = [
     "README.md", "VERSION", "CHANGELOG.md", "skills.lock.json", "setup.sh", ".github/workflows/validate.yml",
-    "docs/INSTALLATION.md", "docs/VSCODE.md", "docs/MULTI_MODEL.md", "docs/MODELS.md", "docs/ASCEND.md", "docs/SKILLS.md",
-    "docs/WORKFLOW.md", "docs/TOOLING.md", "docs/AUTOMATION.md", "docs/TROUBLESHOOTING.md", "docs/UPDATING.md", "docs/VERSIONING.md",
-    "PRINT_RULES.pdf", "bin/ai-task", "bin/codex-glm", "bin/glm-task", "bin/workflow-configure", "bin/workflow-provider-token",
-    "bin/workflow-skills", "bin/workflow-handoffs", "bin/workflow-exp", "codex/config/config.toml", "codex/models.glm.json", "codex/hooks.json",
-    "codex/hooks/post_tool_budget.py", "scripts/merge-codex-config.py", "scripts/merge-codex-hooks.py", "opencode/models.env.example",
+    "docs/INSTALLATION.md", "docs/VSCODE.md", "docs/MODELS.md", "docs/ASCEND.md", "docs/SKILLS.md",
+    "docs/WORKFLOW.md", "docs/TROUBLESHOOTING.md", "docs/UPDATING.md", "docs/VERSIONING.md",
+    "bin/workflow-codex", "bin/workflow-copilot", "bin/workflow-skills", "bin/workflow-handoffs", "bin/workflow-exp", "bin/workflow-setup",
+    "codex/config/config.toml", "codex/hooks.json", "codex/hooks/post_tool_budget.py",
+    "scripts/merge-codex-config.py", "scripts/merge-codex-hooks.py",
     "wsl/02-bootstrap-wsl.sh", "wsl/03-setup-sglang-workspace.sh", "wsl/04-install-ascend-kernel-skills-optional.sh", "wsl/06-update-existing-workspace.sh",
-    "repo/AGENTS.override.md", "repo/.agents/skills/sglang-ascend-kernel-dev/SKILL.md", "repo/.agents/skills/sglang-npu-perf-experiment/SKILL.md",
+    "repo/AGENTS.md", "repo/.agents/skills/sglang-ascend-kernel-dev/SKILL.md", "repo/.agents/skills/sglang-npu-perf-experiment/SKILL.md",
     "repo/.codex/scripts/workflow-doctor.py", "repo/.codex/scripts/workflow-review-packet.py", "repo/.codex/scripts/extract-log-context.py",
     "repo/.codex/scripts/handoff-status.py", "repo/.codex/scripts/new-goal.sh",
 ]
 for path in required:
     require(path)
+
+for forbidden in [
+    "docs/KILO.md", "docs/MULTI_MODEL.md", "opencode", "repo/.kilo", "repo/kilo.jsonc", "repo/AGENTS.override.md", "repo/.sembleignore",
+    "bin/workflow-kilo", "bin/workflow-glm-copilot", "bin/ai-task", "bin/codex-glm", "bin/glm-task", "bin/local-task", "bin/cheap-task", "bin/strong-task",
+    "bin/workflow-configure", "bin/workflow-provider-token", "codex/models.glm.json", "wsl/05-install-serena-optional.sh", "PRINT_RULES.pdf",
+]:
+    if (ROOT / forbidden).exists():
+        errors.append(f"legacy/forbidden path still present: {forbidden}")
 
 try:
     version = (ROOT / "VERSION").read_text().strip()
@@ -43,131 +51,101 @@ try:
 except Exception as exc:
     errors.append(f"version: {exc}")
 
-for path in (ROOT / "codex/config").glob("*.toml"):
-    try:
-        tomllib.loads(path.read_text())
-    except Exception as exc:
-        errors.append(f"invalid TOML {path.relative_to(ROOT)}: {exc}")
-
 try:
     base = tomllib.loads((ROOT / "codex/config/config.toml").read_text())
     for forbidden in ("model", "model_provider", "model_catalog_json"):
         if forbidden in base:
             errors.append(f"default Codex config must not own user {forbidden}")
-except Exception:
-    pass
-
-for region, url in {"china": "https://open.bigmodel.cn/api/v1", "global": "https://api.z.ai/api/v1"}.items():
-    for effort in ("low", "high", "max"):
-        path = ROOT / f"codex/config/glm-{region}-{effort}.config.toml"
-        require(str(path.relative_to(ROOT)))
-        if path.exists():
-            data = tomllib.loads(path.read_text())
-            text = path.read_text()
-            if data.get("model") != "glm-5.3":
-                errors.append(f"{path.name}: model")
-            if data.get("model_reasoning_effort") != effort:
-                errors.append(f"{path.name}: effort")
-            if url not in text or 'wire_api = "responses"' not in text:
-                errors.append(f"{path.name}: endpoint/wire API")
-            if "AI_GLM_API_KEY" in text or "experimental_bearer_token" in text:
-                errors.append(f"{path.name}: secret must not be embedded")
-
-try:
-    models = json.loads((ROOT / "codex/models.glm.json").read_text())
-    model = models["models"][0]
-    if model["slug"] != "glm-5.3" or model["context_window"] != 1048576:
-        errors.append("invalid GLM model catalog")
 except Exception as exc:
-    errors.append(f"GLM catalog: {exc}")
+    errors.append(f"codex config: {exc}")
 
 try:
     hooks = json.loads((ROOT / "codex/hooks.json").read_text())
-    if "PostToolUse" not in hooks.get("hooks", {}):
-        errors.append("codex/hooks.json missing PostToolUse governor")
+    for name in ("SessionStart", "UserPromptSubmit", "PostToolUse"):
+        if name not in hooks.get("hooks", {}):
+            errors.append(f"codex/hooks.json missing {name}")
 except Exception as exc:
     errors.append(f"hooks JSON: {exc}")
+
+# Own skills must already satisfy the portable Agent Skills name contract.
+for skill in sorted((ROOT / "repo/.agents/skills").glob("*/SKILL.md")):
+    text = skill.read_text(encoding="utf-8", errors="replace")
+    m = re.match(r"^---\s*\n(.*?)\n---\s*\n", text, re.S)
+    if not m:
+        errors.append(f"{skill.relative_to(ROOT)}: missing frontmatter")
+        continue
+    front = m.group(1)
+    nm = re.search(r"(?m)^name:\s*['\"]?([^'\"\n]+)", front)
+    desc = re.search(r"(?m)^description:\s*.+$", front)
+    if not nm:
+        errors.append(f"{skill.relative_to(ROOT)}: missing name")
+    elif nm.group(1).strip() != skill.parent.name:
+        errors.append(f"{skill.relative_to(ROOT)}: name must match directory")
+    if not desc:
+        errors.append(f"{skill.relative_to(ROOT)}: missing description")
 
 try:
     lock = json.loads((ROOT / "skills.lock.json").read_text())
     if lock.get("schema") != "sglang-ascend-skill-sources/v2":
         errors.append("skills.lock schema must be v2")
-    sources = lock["sources"]
-    for name in ("cannbot-skills", "kernelhive-ascendc", "awesome-ascend-skills", "ascend-agent-skills"):
-        source = sources.get(name)
+    for name in ("awesome-ascend-skills", "ascend-agent-skills", "cannbot-skills", "kernelhive-ascendc", "bbuf"):
+        source = lock.get("sources", {}).get(name)
         if not source:
             errors.append(f"skills.lock missing {name}")
             continue
         pin = str(source.get("commit", ""))
         if not re.fullmatch(r"[0-9a-f]{8,40}", pin):
-            errors.append(f"skills.lock {name} is not pinned to immutable commit: {pin!r}")
+            errors.append(f"skills.lock {name} is not pinned: {pin!r}")
         if not source.get("selected_skills"):
             errors.append(f"skills.lock {name} has no selected_skills")
-        if source.get("commit") in {"main", "master", "HEAD"}:
-            errors.append(f"skills.lock {name} uses floating ref")
 except Exception as exc:
     errors.append(f"skills.lock: {exc}")
 
 executables = [
-    "setup.sh", "bin/ai-task", "bin/codex-glm", "bin/glm-task", "bin/workflow-configure", "bin/workflow-provider-token",
-    "bin/workflow-skills", "bin/workflow-handoffs", "bin/workflow-exp", "wsl/02-bootstrap-wsl.sh", "wsl/03-setup-sglang-workspace.sh",
-    "wsl/04-install-ascend-kernel-skills-optional.sh", "wsl/06-update-existing-workspace.sh", "scripts/merge-codex-config.py", "scripts/merge-codex-hooks.py",
-    "codex/hooks/post_tool_budget.py", "repo/.codex/scripts/workflow-review-packet.py", "repo/.codex/scripts/extract-log-context.py",
+    "setup.sh", "bin/workflow-codex", "bin/workflow-copilot", "bin/workflow-skills", "bin/workflow-handoffs", "bin/workflow-exp", "bin/workflow-setup",
+    "wsl/02-bootstrap-wsl.sh", "wsl/03-setup-sglang-workspace.sh", "wsl/04-install-ascend-kernel-skills-optional.sh", "wsl/06-update-existing-workspace.sh",
+    "scripts/merge-codex-config.py", "scripts/merge-codex-hooks.py", "scripts/package-release.sh", "codex/hooks/post_tool_budget.py",
+    "repo/.codex/scripts/workflow-review-packet.py", "repo/.codex/scripts/extract-log-context.py",
 ]
 for path in executables:
     if (ROOT / path).exists() and not os.access(ROOT / path, os.X_OK):
         errors.append(f"not executable: {path}")
 
 contracts = {
-    "wsl/02-bootstrap-wsl.sh": [
-        "merge-codex-config.py", "merge-codex-hooks.py", "codex/hooks/*.py", "workflow-handoffs", "workflow-exp",
-    ],
-    "setup.sh": [
-        "Standard - Codex-first workflow + core Ascend skills (Semble/Serena optional)", "INSTALL_SEMBLE=0", "INSTALL_GLM",
-    ],
-    "codex/hooks/post_tool_budget.py": [
-        "SOFT_DEFAULT = 32", "CHECKPOINT_DEFAULT = 44", "systemMessage", "session-budget", "file_identity",
-    ],
-    "repo/.codex/scripts/extract-log-context.py": [
-        "default=32768", "default=400", "--expand", "UNIQUE_SIGNATURES", "normalize_signature",
-    ],
-    "repo/.codex/scripts/workflow-review-packet.py": [
-        "DEFAULT_MAX_BYTES = 98304", "--unified=", ".codex-artifacts", "reviews",
-    ],
-    "repo/.codex/scripts/handoff-status.py": ["archived", "archive_reason", "older-than-hours", "gc"],
-    "repo/AGENTS.override.md": [
-        "one active editing-agent session per Git worktree", ">=1 MiB", "sglang-ascend-kernel-dev", "sglang-npu-perf-experiment",
-        "Measured retrieval budget", "workflow-review-packet.py", "workflow-handoffs gc", "workflow-exp record",
-    ],
-    "README.md": [
-        "OpenCode stays optional", "workflow-skills status", "GLM Coding Plan", "PostToolUse", "workflow-review-packet.py",
-        "Standard | Codex-first workflow + OpenAI extension + core Ascend skills; Semble/Serena off",
-    ],
-    "wsl/06-update-existing-workspace.sh": ["v0.1.x", "Created migration manifest", "install.env"],
-    "bin/workflow-skills": ["checkout", "--detach", "update requires at least one --only SOURCE", ".skills-index.json"],
+    "setup.sh": ["Primary UI:", "Codex Bridge:", "GLM Copilot provider:", "Official Codex fallback:", "workflow-setup"],
+    "wsl/02-bootstrap-wsl.sh": ["workflow-copilot", "OpenAI.chatgpt", "GitHub.copilot-chat", "grikomsn.openai-oauth-copilot-chat", "yijiazhen-qi.glm-for-github-copilot-chat", "removed legacy Kilo"],
+    "wsl/03-setup-sglang-workspace.sh": ["cp \"$KIT_ROOT/repo/AGENTS.md\"", "link_exact", "directory name == SKILL.md frontmatter name", "rm -rf \"$SGLANG/.kilo\"", "'.vscode/settings.json'"],
+    "bin/workflow-copilot": ["grikomsn.openai-oauth-copilot-chat", "glm-copilot.apiMode", '"coding-plan"', "glm-copilot.region", '"china"', "openaiCodex.showUsageStatusBar", "Codex Bridge: Add ChatGPT Account", "GLM: Set API Key"],
+    "repo/AGENTS.md": ["One active editing agent per Git worktree", ">=1 MiB", "workflow-review-packet.py", "sglang-ascend-kernel-dev", "sglang-npu-perf-experiment"],
+    "repo/.codex/scripts/extract-log-context.py": ["default=32768", "default=400", "--expand", "normalize_signature"],
+    "repo/.codex/scripts/workflow-review-packet.py": ["DEFAULT_MAX_BYTES = 98304", "--unified=", ".codex-artifacts", "reviews"],
+    "codex/hooks/post_tool_budget.py": ["SOFT_DEFAULT = 32", "CHECKPOINT_DEFAULT = 44", "session-budget"],
+    "README.md": ["GitHub Copilot Chat", "Codex Bridge", "GLM Models for GitHub Copilot Chat", "workflow-copilot", "AGENTS.md", ".agents/skills/"],
 }
 for rel, needles in contracts.items():
     path = ROOT / rel
-    if path.exists():
-        text = path.read_text()
-        for needle in needles:
-            if needle not in text:
-                errors.append(f"{rel}: missing contract {needle}")
+    if not path.exists():
+        continue
+    text = path.read_text()
+    for needle in needles:
+        if needle not in text:
+            errors.append(f"{rel}: missing contract {needle}")
 
-# Destructive upgrade regressions must never return. Fresh-only config creation is allowed.
-bootstrap = (ROOT / "wsl/02-bootstrap-wsl.sh").read_text() if (ROOT / "wsl/02-bootstrap-wsl.sh").exists() else ""
-if 'if [[ ! -e "$CODEX_HOME/config.toml" ]]' not in bootstrap or "merge-codex-config.py" not in bootstrap:
-    errors.append("bootstrap lacks guarded/non-destructive config creation")
-if 'backup "$CODEX_HOME/config.toml"' in bootstrap:
-    errors.append("bootstrap still uses legacy replace-style config backup path")
-if 'cp "$KIT_ROOT/codex/hooks.json" "$CODEX_HOME/hooks.json"' in bootstrap:
-    errors.append("bootstrap destructively copies hooks.json")
+bootstrap = (ROOT / "wsl/02-bootstrap-wsl.sh").read_text()
+if re.search(r"npm\s+install\s+-g\s+@openai/codex", bootstrap):
+    errors.append("bootstrap must not root/global-update Codex")
 if "merge-codex-hooks.py" not in bootstrap:
     errors.append("bootstrap does not merge hooks")
+if 'cp "$KIT_ROOT/codex/hooks.json" "$CODEX_HOME/hooks.json"' in bootstrap:
+    errors.append("bootstrap destructively copies hooks")
+
+workspace = (ROOT / "wsl/03-setup-sglang-workspace.sh").read_text()
+if re.search(r">\s*\"\$SGLANG/\.agents/\.workflow-kit-version\"", workspace) or re.search(r">\s*\"\$SGLANG/\.codex/KIT_VERSION\"", workspace):
+    errors.append("workspace layer writes version markers before transaction completes")
 
 if errors:
     print("Repository validation failed:", file=sys.stderr)
     for error in errors:
         print("- " + error, file=sys.stderr)
     raise SystemExit(1)
-print("Repository metadata, non-destructive Codex migration, retrieval governor, bounded reducers, skill pins, and provider isolation: OK")
+print("Repository metadata, unified Copilot UI, Codex Bridge + GLM providers, canonical Agent Skills, bounded retrieval, and legacy cleanup: OK")

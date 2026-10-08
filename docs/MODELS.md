@@ -1,28 +1,50 @@
-# Models and provider roles
+# Models and subscriptions
 
-Status reviewed for this release: 2026-10-07. Provider models, quotas and subscription terms change; verify provider documentation before relying on a quota.
+## Codex inside Copilot Chat
 
-## OpenAI / Codex
+`grikomsn.openai-oauth-copilot-chat` registers a native Copilot Chat language-model provider backed by the user's ChatGPT/Codex subscription.
 
-OpenAI remains the default provider and the VS Code extension's native model/reasoning UI is preserved. The kit ships OpenAI profiles for light/default/hard/xhigh work.
+The kit only manages safe workspace defaults:
 
-## BigModel / Z.AI GLM Coding Plan
+```json
+{
+  "openaiCodex.showUsageStatusBar": true,
+  "openaiCodex.catalogCacheMinutes": 5,
+  "openaiCodex.debugLogging": false
+}
+```
 
-The kit supports GLM-5.3 through Codex's Responses-compatible custom provider path.
+Do not pin a Codex model or reasoning effort in the repository. Choose them in the Copilot Chat model picker. The provider's authenticated live catalog is authoritative.
 
-| Region | Endpoint | Reasoning |
-|---|---|---|
-| BigModel China | `https://open.bigmodel.cn/api/v1` | low / high / max |
-| Z.AI Global | `https://api.z.ai/api/v1` | low / high / max |
+Authentication is intentionally manual:
 
-The included GLM catalog declares a 1,048,576-token context window and freeform apply-patch support following the provider's Codex integration metadata. The API key is read from private workflow config at launch time.
+```text
+Codex Bridge: Add ChatGPT Account
+profile: personal
+→ complete OAuth
 
-Suggested role in this kit: bounded repository investigation, documentation, routine fixes/refactors, first-pass review, and iterative kernel scaffolding. `balanced` routing keeps hard NPU/distributed/performance/kernel verification on the OpenAI hard profile by default.
+Chat: Manage Language Models
+→ Add Models
+→ Codex Bridge
+→ profile: personal
+```
 
-## Other external providers
+## BigModel GLM inside Copilot Chat
 
-`workflow-configure` retains presets for DeepSeek, Z.AI free API access, Kimi Code, MiniMax, OpenRouter free routing, Alibaba Coding Plan, and Alibaba Model Studio. These use the optional OpenCode harness and are independent of GLM's Codex-native integration.
+`yijiazhen-qi.glm-for-github-copilot-chat` is configured for the Mainland China Coding Plan:
 
-## Self-hosted
+```json
+{
+  "glm-copilot.apiMode": "coding-plan",
+  "glm-copilot.region": "china",
+  "glm-copilot.thinking": "enabled",
+  "glm-copilot.showUsageStatusBar": true,
+  "glm-copilot.usageRefreshIntervalMinutes": 5
+}
+```
 
-Any OpenAI-compatible vLLM/SGLang/llama.cpp/gateway can occupy the `local` slot. Validate tool calling and long-context behavior before using it as an editing agent.
+Set the key with `GLM: Set API Key`; VS Code stores it in SecretStorage. GLM-5.3 exposes Low/High/Max reasoning choices through the Copilot model configuration.
+
+## Fallback official Codex
+
+`OpenAI.chatgpt` remains installed but is not the default daily UI. Use it when native Codex hooks/session behavior is more important than keeping both providers in one Copilot conversation surface.

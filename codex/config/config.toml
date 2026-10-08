@@ -1,4 +1,4 @@
 #:schema https://developers.openai.com/codex/config-schema.json
 
-# Intentionally minimal. v0.3.1 never replaces an existing ~/.codex/config.toml.
+# Intentionally minimal. v0.4.0 never replaces an existing ~/.codex/config.toml.
 # OpenAI model/reasoning selection remains owned by the user and the Codex UI.

@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,79 @@ LOCK = Path(os.environ.get("WORKFLOW_SKILLS_LOCK", str(CONFIG_ROOT / "skills.loc
 if not LOCK.is_file():
     LOCK = ROOT / "skills.lock.json"
 CODE_ROOT = Path(os.environ.get("CODE_ROOT", str(Path.home() / "code")))
+
+
+
+def _frontmatter_skill_name(skill_file: Path) -> str | None:
+    try:
+        head = skill_file.read_text(encoding="utf-8", errors="replace")[:6000]
+    except OSError:
+        return None
+    match = re.match(r"^---\s*\n(.*?)\n---\s*\n", head, re.S)
+    if not match:
+        return None
+    name_m = re.search(r"(?m)^name:\s*(.+?)\s*$", match.group(1))
+    return name_m.group(1).strip().strip('"\'') if name_m else None
+
+
+def dedupe(workspace: Path) -> int:
+    """Remove only provably redundant skill symlinks; never delete real skill directories."""
+    base = workspace / ".agents/skills"
+    if not base.is_dir():
+        print(f"skill workspace missing: {base}")
+        return 1
+
+    groups: dict[str, list[Path]] = {}
+    for entry in sorted(base.iterdir()):
+        if entry.name.startswith("."):
+            continue
+        skill = entry / "SKILL.md"
+        if not skill.is_file():
+            continue
+        name = _frontmatter_skill_name(skill)
+        if name:
+            groups.setdefault(name, []).append(entry)
+
+    removed = 0
+    conflicts = 0
+    for name, entries in sorted(groups.items()):
+        if len(entries) < 2:
+            continue
+        real = [p for p in entries if not p.is_symlink()]
+        if len(real) == 1:
+            keep = real[0]
+            removable = [p for p in entries if p.is_symlink()]
+        elif len(real) > 1:
+            print(f"CONFLICT {name}: multiple real skill directories: " + ", ".join(str(p) for p in entries))
+            conflicts += 1
+            continue
+        else:
+            targets = {}
+            for p in entries:
+                try:
+                    targets.setdefault(str(p.resolve(strict=True)), []).append(p)
+                except OSError:
+                    targets.setdefault(f"BROKEN:{p}", []).append(p)
+            if len(targets) != 1:
+                print(f"CONFLICT {name}: duplicate symlinks point to different sources: " + ", ".join(str(p) for p in entries))
+                conflicts += 1
+                continue
+            canonical = [p for p in entries if p.name == name]
+            keep = sorted(canonical or entries, key=lambda p: p.name)[0]
+            removable = [p for p in entries if p != keep]
+
+        for p in removable:
+            if not p.is_symlink():
+                continue
+            p.unlink()
+            removed += 1
+            print(f"deduped: {name}: removed redundant symlink {p.name}; kept {keep.name}")
+
+    if conflicts:
+        print(f"skill dedupe: {conflicts} ambiguous conflict(s) require manual review")
+        return 1
+    print(f"skill dedupe: OK ({removed} redundant symlink(s) removed)")
+    return 0
 
 
 def run(cmd: list[str], cwd: Path | None = None, check: bool = False) -> tuple[int, str]:
@@ -58,13 +132,15 @@ def resolve_pin(dest: Path, pin: str) -> str:
 
 
 def validate_skills(name: str, source: dict, dest: Path) -> list[str]:
-    missing = []
-    for skill in source.get("selected_skills", []):
-        matches = list(dest.rglob(f"{skill}/SKILL.md"))
-        if not matches:
-            missing.append(skill)
-    if missing:
-        raise SystemExit(f"{name}: pinned source is missing selected skills: {', '.join(missing)}")
+    selected = source.get("selected_skills", [])
+    required = set(source.get("required_skills", selected))
+    missing = [skill for skill in selected if not list(dest.rglob(f"{skill}/SKILL.md"))]
+    fatal = [skill for skill in missing if skill in required]
+    optional = [skill for skill in missing if skill not in required]
+    if optional:
+        print(f"warning: {name}: pinned source is missing optional selected skills: {', '.join(optional)}")
+    if fatal:
+        raise SystemExit(f"{name}: pinned source is missing required skills: {', '.join(fatal)}")
     return missing
 
 
@@ -97,10 +173,12 @@ def ensure_clone(name: str, source: dict, update_branch: bool = False) -> str:
     return full
 
 
-def status(data: dict, only: list[str]) -> int:
+def status(data: dict, only: list[str], installed_only: bool = False) -> int:
     bad = 0
     for name, source in selected_sources(data, only, True):
         dest = CODE_ROOT / source["directory"]
+        if installed_only and not (dest / ".git").is_dir():
+            continue
         pin = str(source["commit"])
         if not (dest / ".git").is_dir():
             print(f"{name:24} MISSING expected={pin} {dest}")
@@ -176,19 +254,23 @@ def index(data: dict) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["status", "install", "update", "snapshot", "index"])
+    ap.add_argument("command", choices=["status", "install", "update", "snapshot", "index", "dedupe"])
     ap.add_argument("--only", action="append", default=[], metavar="SOURCE")
     ap.add_argument("--include-optional", action="store_true")
+    ap.add_argument("--installed-only", action="store_true", help="status: skip sources that are not installed")
+    ap.add_argument("--workspace", type=Path, default=Path(os.environ.get("SGLANG", str(CODE_ROOT / "sglang"))))
     args = ap.parse_args()
     data = load()
     if args.command == "status":
-        return status(data, args.only)
+        return status(data, args.only, args.installed_only)
     if args.command == "install":
         return install(data, args.only, args.include_optional)
     if args.command == "update":
         return update(data, args.only)
     if args.command == "snapshot":
         return snapshot(data)
+    if args.command == "dedupe":
+        return dedupe(args.workspace.expanduser().resolve())
     return index(data)
 
 

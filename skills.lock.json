@@ -1,6 +1,6 @@
 {
   "schema": "sglang-ascend-skill-sources/v2",
-  "generated_at": "2026-10-07",
+  "generated_at": "2026-10-08",
   "notes": "Install uses immutable commit pins. workflow-skills update intentionally advances the private installed lock; repository releases remain reproducible.",
   "sources": {
     "awesome-ascend-skills": {
@@ -11,7 +11,15 @@
       "auto_install": true,
       "tier": "core",
       "license": "upstream",
-      "selected_skills": ["torch_npu", "profiling-analysis", "pytorch-profiling-collection", "npu-op-benchmark", "ascend-opplugin", "triton-ascend-migration", "ascendc"]
+      "selected_skills": [
+        "torch_npu",
+        "profiling-analysis",
+        "pytorch-profiling-collection",
+        "npu-op-benchmark",
+        "ascend-opplugin",
+        "triton-ascend-migration",
+        "ascendc"
+      ]
     },
     "ascend-agent-skills": {
       "url": "https://github.com/Ascend/agent-skills.git",
@@ -21,7 +29,30 @@
       "auto_install": true,
       "tier": "core",
       "license": "MulanPSL-2.0",
-      "selected_skills": ["npu-adapter-reviewer", "ascend-profiling-anomaly", "hccl-test", "triton-operator-env-config", "triton-operator-code-review", "triton-operator-precision-eval", "triton-operator-performance-eval", "triton-operator-performance-optim", "ascendc-operator-design", "ascendc-operator-compile-debug", "ascendc-operator-frame-adapter-torch", "ascendc-operator-precision-eval"]
+      "selected_skills": [
+        "npu-adapter-reviewer",
+        "ascend-profiling-anomaly",
+        "hccl-test",
+        "triton-operator-env-config",
+        "triton-operator-code-review",
+        "triton-operator-precision-eval",
+        "triton-operator-performance-eval",
+        "triton-operator-performance-optim",
+        "ascendc-operator-design",
+        "ascendc-operator-project-init",
+        "ascendc-operator-code-gen",
+        "ascendc-operator-compile-debug",
+        "ascendc-operator-precision-debug",
+        "ascendc-operator-precision-eval",
+        "ascendc-operator-performance-eval",
+        "ascendc-operator-performance-optim",
+        "ascendc-operator-code-review"
+      ],
+      "required_skills": [
+        "npu-adapter-reviewer",
+        "ascend-profiling-anomaly",
+        "hccl-test"
+      ]
     },
     "cannbot-skills": {
       "url": "https://gitcode.com/cann/cannbot-skills.git",
@@ -32,7 +63,31 @@
       "auto_install": false,
       "tier": "kernel",
       "license": "upstream",
-      "selected_skills": ["npu-arch", "ascendc-api-best-practices", "ascendc-docs-search", "ascendc-env-check", "ascendc-tiling-design", "ascendc-precision-debug", "ascendc-runtime-debug", "ascendc-crash-debug", "ascendc-sync-audit", "ascendc-code-review", "ascendc-direct-invoke-template", "ops-profiling", "ops-precision-standard"]
+      "selected_skills": [
+        "npu-arch",
+        "ascendc-api-best-practices",
+        "ascendc-docs-search",
+        "ascendc-env-check",
+        "ascendc-tiling-design",
+        "ascendc-precision-debug",
+        "ascendc-runtime-debug",
+        "ascendc-crash-debug",
+        "ascendc-sync-audit",
+        "ascendc-code-review",
+        "ascendc-direct-invoke-template",
+        "ops-profiling",
+        "ops-precision-standard"
+      ],
+      "required_skills": [
+        "npu-arch",
+        "ascendc-api-best-practices",
+        "ascendc-env-check",
+        "ascendc-tiling-design",
+        "ascendc-precision-debug",
+        "ascendc-runtime-debug",
+        "ascendc-code-review",
+        "ops-profiling"
+      ]
     },
     "kernelhive-ascendc": {
       "url": "https://github.com/KernelHive/ascendc-skill.git",
@@ -42,7 +97,11 @@
       "auto_install": false,
       "tier": "experimental",
       "license": "upstream",
-      "selected_skills": ["ascend-kernel-generator", "ascend-npu-migration", "ascend-doc-update"]
+      "selected_skills": [
+        "ascend-kernel-generator",
+        "ascend-npu-migration",
+        "ascend-doc-update"
+      ]
     },
     "bbuf": {
       "url": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS.git",
@@ -52,7 +111,13 @@
       "auto_install": false,
       "tier": "extended",
       "license": "upstream",
-      "selected_skills": ["sglang-humanize-review", "model-pr-optimization-history", "llm-torch-profiler-analysis", "llm-pipeline-analysis", "sglang-prod-incident-triage"]
+      "selected_skills": [
+        "sglang-humanize-review",
+        "model-pr-optimization-history",
+        "llm-torch-profiler-analysis",
+        "llm-pipeline-analysis",
+        "sglang-prod-incident-triage"
+      ]
     }
   }
 }

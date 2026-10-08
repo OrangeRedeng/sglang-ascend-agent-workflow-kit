@@ -1,51 +1,57 @@
 # Troubleshooting
 
-## My Codex config changed after update
-
-v0.3.1 should not replace `~/.codex/config.toml`. Check for a pre-v0.3.1 backup created by an older installer (`config.toml.bak-*`) only if you previously installed v0.3.0. Current updates use `scripts/merge-codex-config.py` and preserve unrelated sections.
-
-## Hooks show Untrusted / Modified
-
-This is expected after installing a new hook definition. Start Codex and run `/hooks`, then review/approve the kit entries. `workflow-doctor.py` reports presence but never changes trust.
-
-## Session-budget warnings are too early/late
-
-Override thresholds for an experiment host/session:
+## Copilot Chat does not show Codex
 
 ```bash
-export SGLANG_WORKFLOW_TOOL_SOFT_LIMIT=36
-export SGLANG_WORKFLOW_TOOL_CHECKPOINT_LIMIT=52
+workflow-copilot configure --workspace ~/code/sglang
+workflow-copilot doctor --workspace ~/code/sglang
 ```
 
-Do not disable the governor merely to continue broad retrieval. For long Goals, checkpoint artifacts and rotate agent sessions.
+Then run `Codex Bridge: Add ChatGPT Account`, complete OAuth with profile `personal`, and add a Codex Bridge entry from `Chat: Manage Language Models -> Add Models` using the same profile ID.
 
-## Focused log is still too large
+## Codex quota is not visible
 
-v0.3.1 defaults to ~32 KiB / 400 lines. If one error needs more context, use:
+Confirm `openaiCodex.showUsageStatusBar=true` in the workspace settings, then run `Codex Bridge: Show Usage` or click the Codex Bridge status-bar item after authentication.
+
+## GLM models do not appear
+
+Run `GLM: Set API Key`. The workspace must contain:
+
+```text
+glm-copilot.apiMode = coding-plan
+glm-copilot.region  = china
+```
+
+If authentication fails, clear and re-enter the secret with the extension commands. Do not configure a generic PAYG endpoint.
+
+## VS Code version failure
+
+The current GLM provider requires VS Code 1.127+ and Codex Bridge requires 1.125+. Update VS Code, reopen the folder through WSL, and rerun `workflow-copilot doctor`.
+
+## `codex` resolves to Windows or is broken
+
+The official Codex extension is only a fallback, but the CLI can be repaired safely:
 
 ```bash
-.codex/scripts/extract-log-context.py run.log --expand <signature-id>
+workflow-codex repair
+workflow-codex doctor
 ```
 
-Do not increase the global cap first.
+The managed WSL copy lives under `~/.local/npm/bin` and does not require `sudo npm install -g`.
 
-## Skill source reports DRIFT
+## Skill does not appear
 
 ```bash
-workflow-skills status
+workflow-skills dedupe --workspace ~/code/sglang
+workflow-setup doctor --workspace ~/code/sglang
 ```
 
-If the checkout is dirty, the manager refuses to move it. Commit/stash/remove local changes intentionally. To restore the release pin, rerun setup/`workflow-skills install --only SOURCE`. To intentionally advance, use `workflow-skills update --only SOURCE`.
+The skill directory name must exactly match the `name:` in `SKILL.md`.
 
-## Legacy v0.1.x says no install manifest
+## Kilo/OpenCode leftovers
 
-Use `./wsl/06-update-existing-workspace.sh`; v0.3.1 can create a conservative migration manifest from the legacy installation.
+They are not used. Rerun the updater; it removes kit-created Kilo workspace files, Kilo extension/CLI, old provider routers and legacy commands.
 
-## GLM diagnostics
+## Native Codex hooks
 
-```bash
-python3 .codex/scripts/workflow-doctor.py
-python3 .codex/scripts/workflow-doctor.py --online
-```
-
-The online mode sends only a tiny smoke prompt and never prints the API key or response body on HTTP failure.
+Codex-specific hooks do not run through Codex Bridge because the agent harness is Copilot Chat. If a task needs those hooks, use the official Codex extension and review `/hooks` after hook changes.
