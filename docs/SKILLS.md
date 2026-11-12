@@ -13,6 +13,8 @@ v0.5 removes prefixed aliases such as `upstream-*`, `official-*`, `ascend-*`, `b
 
 Pinned sources are defined in `skills.lock.json`.
 
+For PR CI reports, use `sglang-ci-report` to inspect current job evidence and prepare the `Job / Error / PR-related?` table. It drafts by default and publishes when requested. Example: “Use $sglang-ci-report to prepare and post a CI report for PR #42224.”
+
 Useful commands:
 
 ```bash
