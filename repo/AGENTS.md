@@ -36,6 +36,13 @@ python3 .codex/scripts/workflow-review-packet.py --pr <N>
 
 Then expand only around a concrete invariant, caller, or regression hypothesis.
 
+## Before implementing a new feature
+
+- Search live open PRs in SGLang before writing code. Also check MindIE-SD or vllm-ascend when relevant to the feature or backend; resolve their current upstream repositories rather than guessing fork URLs.
+- Search by feature/model/operator names, affected symbols, and common aliases. Include draft PRs and inspect the description, relevant diff, and review discussion of likely matches.
+- Briefly report the search scope, matching PR links, and overlap with the requested work. Use existing work to identify reuse opportunities and the remaining implementation gap before proceeding; avoid duplicating an open implementation.
+- If no relevant PR is found, say so. If search access fails, disclose the gap rather than claiming there are no matches. Do not merge or cherry-pick another PR without authorization.
+
 ## Large logs
 
 Treat >=1 MiB or >=10,000 lines as large. Do not read the full log first.
